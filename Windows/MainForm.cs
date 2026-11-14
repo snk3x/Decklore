@@ -16,7 +16,11 @@ public class MainForm : Form
     readonly Dictionary<Game, DeckRules> _rules;
 
     ComboBox _gameBox, _formatBox, _cameraBox;
-    CheckBox _autoDetect, _addToDeck;
+    CheckBox _autoDetect, _addToDeck, _autoScan;
+    readonly AutoScanSession _auto = new();
+    readonly System.Windows.Forms.Timer _autoTimer = new() { Interval = 700 };
+    bool _autoBusy;
+    DateTime _flashUntil;
     PictureBox _cameraView, _lastCardPic;
     Label _lastCardLabel, _status, _deckSummary, _collectionSummary;
     int _sessionCount;
@@ -68,6 +72,8 @@ public class MainForm : Form
 
         BuildUi();
         _camera.FrameReady += OnFrame;
+        _autoTimer.Tick += async (s, e) => await AutoScanTick();
+        _autoTimer.Start();
         _gameBox.SelectedIndex = (int)_data.LastGame;
         Shown += (s, e) =>
         {
@@ -157,6 +163,13 @@ public class MainForm : Form
         var checks = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
         _autoDetect = new CheckBox { Text = "Detect the game automatically", AutoSize = true, Checked = true };
         _addToDeck = new CheckBox { Text = "Also add scanned cards to the deck", AutoSize = true };
+        _autoScan = new CheckBox { Text = "Auto scan: add cards as soon as the camera sees them", AutoSize = true, Checked = true };
+        _autoScan.CheckedChanged += (s, e) =>
+        {
+            _auto.Reset();
+            if (_camera.Running) SetStatus(_autoScan.Checked ? "Auto scan on. Hold a card inside the green frame." : "Auto scan off. Press Scan card (F5) for each card.");
+        };
+        checks.Controls.Add(_autoScan);
         checks.Controls.Add(_autoDetect);
         checks.Controls.Add(_addToDeck);
 
@@ -503,7 +516,9 @@ public class MainForm : Form
             await Task.Run(() => _camera.Start(idx));
             _camBtn.Text = "Stop camera";
             _scanBtn.Enabled = !_busy;
-            SetStatus("Camera on. Hold the card flat inside the green frame, then press Scan card (F5).");
+            SetStatus(_autoScan.Checked
+                ? "Camera on. Hold a card flat inside the green frame; it's added automatically. Swap in the next card when you hear the sound."
+                : "Camera on. Hold the card flat inside the green frame, then press Scan card (F5).");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { _camBtn.Enabled = true; }
@@ -529,13 +544,17 @@ public class MainForm : Form
         float scale = Math.Min((float)_cameraView.Width / img.Width, (float)_cameraView.Height / img.Height);
         float ox = (_cameraView.Width - img.Width * scale) / 2, oy = (_cameraView.Height - img.Height * scale) / 2;
         var rc = new RectangleF(ox + r.X * scale, oy + r.Y * scale, r.Width * scale, r.Height * scale);
-        using var pen = new Pen(Color.LimeGreen, 3);
+        // Green normally, gold while auto scan is checking a card, a thick bright flash when one is added.
+        bool flash = DateTime.Now < _flashUntil;
+        bool checking = _autoScan.Checked && _auto.Status.StartsWith("Checking");
+        var color = flash ? Color.FromArgb(0, 255, 120) : checking ? Color.Gold : Color.LimeGreen;
+        using var pen = new Pen(color, flash ? 8 : 3);
         e.Graphics.DrawRectangle(pen, rc.X, rc.Y, rc.Width, rc.Height);
-        using var dash = new Pen(Color.FromArgb(170, Color.LimeGreen), 1) { DashStyle = DashStyle.Dash };
+        using var dash = new Pen(Color.FromArgb(170, color), 1) { DashStyle = DashStyle.Dash };
         float nameLine = rc.Y + rc.Height * 0.2f;
         e.Graphics.DrawLine(dash, rc.X, nameLine, rc.Right, nameLine);
-        using var brush = new SolidBrush(Color.LimeGreen);
-        e.Graphics.DrawString("Card name goes above this line", Font, brush, rc.X + 6, nameLine + 4);
+        using var brush = new SolidBrush(color);
+        e.Graphics.DrawString(_autoScan.Checked ? _auto.Status : "Card name goes above this line", Font, brush, rc.X + 6, nameLine + 4);
     }
 
     // ------------------------------------------------------------------ scanning
@@ -562,6 +581,47 @@ public class MainForm : Form
         catch (Exception ex) { ShowError(ex); }
     }
 
+    /// <summary>Finds the card a scan shows, trying the likely games in order.</summary>
+    async Task<Card> FindCardAsync(ScanResult res, bool showProgress)
+    {
+        var games = !_autoDetect.Checked ? new List<Game> { CurrentGame }
+                  : res.GameConfident ? res.GameGuesses.Take(1).ToList()
+                  : new[] { CurrentGame }.Concat(res.GameGuesses.Where(g => g != CurrentGame)).ToList();
+        foreach (var g in games)
+        {
+            var game = g;
+            var found = await CardMatcher.FindBestAsync(Source(g), res, g,
+                showProgress ? cand => SetStatus($"Looking up \"{cand}\" in {GameInfo.Short(game)}...") : null);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    /// <summary>Auto scan: reads the camera every 0.7 s and adds a card once it has been seen twice in a row.</summary>
+    async Task AutoScanTick()
+    {
+        if (!_camera.Running || !_autoScan.Checked || _busy || _autoBusy) return;
+        _autoBusy = true;
+        try
+        {
+            using var frame = _camera.Snapshot();
+            if (frame == null) return;
+            using var crop = frame.Clone(GuideRect(frame.Size), frame.PixelFormat);
+            var scan = await CardOcr.ReadAsync(crop);
+            var card = await _auto.ProcessAsync(scan, s => FindCardAsync(s, showProgress: false), DateTime.Now);
+            if (card != null)
+            {
+                AddCard(card);
+                System.Media.SystemSounds.Asterisk.Play();
+                _flashUntil = DateTime.Now.AddSeconds(0.8);
+            }
+            else SetStatus("Auto scan: " + _auto.Status);
+            _cameraView.Invalidate();
+        }
+        catch (Exception ex) { ShowError(ex); }
+        finally { _autoBusy = false; }
+    }
+
     async Task ScanBitmapAsync(Bitmap card)
     {
         if (_busy) return;
@@ -575,18 +635,7 @@ public class MainForm : Form
                 return;
             }
 
-            var games = !_autoDetect.Checked ? new List<Game> { CurrentGame }
-                      : res.GameConfident ? res.GameGuesses.Take(1).ToList()
-                      : new[] { CurrentGame }.Concat(res.GameGuesses.Where(g => g != CurrentGame)).ToList();
-
-            Card found = null;
-            foreach (var g in games)
-            {
-                var game = g;
-                found = await CardMatcher.FindBestAsync(Source(g), res, g,
-                    cand => SetStatus($"Looking up \"{cand}\" in {GameInfo.Short(game)}..."));
-                if (found != null) break;
-            }
+            var found = await FindCardAsync(res, showProgress: true);
 
             if (found == null)
             {
@@ -672,6 +721,7 @@ public class MainForm : Form
 
     void UndoLast()
     {
+        _auto.Reset();
         var e = _lastAdded;
         if (e == null || !_data.Libraries.Values.Any(l => l.Entries.ContainsValue(e)))
         {

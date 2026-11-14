@@ -14,6 +14,12 @@ public class ScanPage : ContentPage
 	readonly Label _cardValue = new Label { FontSize = 16, FontAttributes = FontAttributes.Bold }.GoodText();
 	readonly Label _session = Ui.Note();
 	readonly Border _result;
+	readonly LiveCameraView _camera = new() { HeightRequest = 460 };
+	readonly Border _frame = new() { StrokeThickness = 4, BackgroundColor = Colors.Transparent, Margin = new Thickness(28, 18), InputTransparent = true };
+	readonly Label _liveStatus = new() { TextColor = Colors.White, FontSize = 15, FontAttributes = FontAttributes.Bold, Padding = new Thickness(10, 6), HorizontalTextAlignment = TextAlignment.Center };
+	readonly Button _liveButton;
+	readonly AutoScanSession _auto = new();
+	bool _liveWanted = true, _permissionAsked;
 	bool _autoDetect = true, _addToDeck, _working;
 	LibraryEntry _last;
 	bool _lastToDeck;
@@ -36,6 +42,22 @@ public class ScanPage : ContentPage
 		});
 		_result.IsVisible = false;
 
+		// Live scan: the camera preview with a guide frame and a status line on top of it.
+		_camera.FrameScanned = OnFrameScanned;
+		_camera.CameraError = msg => _liveStatus.Text = msg;
+		_liveStatus.Text = "Point the camera at a card.";
+		SetFrameColor("#4ADE80");
+		var liveArea = new Grid { HeightRequest = 460, BackgroundColor = Colors.Black };
+		liveArea.Add(_camera);
+		liveArea.Add(_frame);
+		liveArea.Add(new Border
+		{
+			Content = _liveStatus, BackgroundColor = Color.FromArgb("#99000000"), StrokeThickness = 0,
+			VerticalOptions = LayoutOptions.End, Margin = new Thickness(0, 0, 0, 10), HorizontalOptions = LayoutOptions.Center,
+			StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 8 }, InputTransparent = true,
+		});
+		_liveButton = Ui.Secondary("Pause camera", ToggleLive);
+
 		Content = new ScrollView
 		{
 			Content = new VerticalStackLayout
@@ -46,7 +68,10 @@ public class ScanPage : ContentPage
 				{
 					Ui.Title("Scan cards"),
 					Ui.GamePicker(),
-					Ui.Row(Ui.Primary("Take photo", () => Scan(fromCamera: true)), Ui.Secondary("Choose photo", () => Scan(fromCamera: false))),
+					liveArea,
+					Ui.Note("Hold one card flat inside the frame. It's added automatically; swap in the next card when the phone vibrates."),
+					_liveButton,
+					Ui.Row(Ui.Secondary("Take photo", () => Scan(fromCamera: true)), Ui.Secondary("Choose photo", () => Scan(fromCamera: false))),
 					new Grid
 					{
 						ColumnDefinitions = { new(GridLength.Star), new(GridLength.Auto) }, ColumnSpacing = 8,
@@ -67,6 +92,88 @@ public class ScanPage : ContentPage
 	}
 
 	static View WithColumn(View v, int col) { Grid.SetColumn(v, col); return v; }
+
+	// ------------------------------------------------------------------ live scan
+
+	protected override async void OnAppearing()
+	{
+		base.OnAppearing();
+		if (_liveWanted) await StartLive();
+	}
+
+	protected override void OnDisappearing()
+	{
+		base.OnDisappearing();
+		_camera.IsActive = false; // stop the camera when leaving the tab, to save battery
+	}
+
+	async Task StartLive()
+	{
+		var status = await Permissions.CheckStatusAsync<Permissions.Camera>();
+		if (status != PermissionStatus.Granted && !_permissionAsked)
+		{
+			_permissionAsked = true;
+			status = await Permissions.RequestAsync<Permissions.Camera>();
+		}
+		if (status != PermissionStatus.Granted)
+		{
+			_liveStatus.Text = "Camera permission is off. Allow it in Android Settings > Apps > TCG deck scanner.";
+			return;
+		}
+		_camera.IsActive = true;
+		_liveButton.Text = "Pause camera";
+	}
+
+	async Task ToggleLive()
+	{
+		_liveWanted = !_camera.IsActive;
+		if (_liveWanted) await StartLive();
+		else
+		{
+			_camera.IsActive = false;
+			_liveButton.Text = "Resume camera";
+			_liveStatus.Text = "Camera paused.";
+		}
+	}
+
+	void SetFrameColor(string hex) =>
+		_frame.Stroke = new SolidColorBrush(Color.FromArgb(hex));
+
+	/// <summary>Runs for each live frame: decides via the shared AutoScanSession whether a card should be added.</summary>
+	async Task OnFrameScanned(ScanResult scan)
+	{
+		if (_working || !_camera.IsActive) return;
+		try
+		{
+			var card = await _auto.ProcessAsync(scan, FindCardAsync, DateTime.Now);
+			_liveStatus.Text = _auto.Status;
+			if (card != null)
+			{
+				AddCard(card);
+				try { HapticFeedback.Default.Perform(HapticFeedbackType.LongPress); } catch { }
+				SetFrameColor("#00FF78");
+				_frame.StrokeThickness = 9;
+				await Task.Delay(700);
+				_frame.StrokeThickness = 4;
+			}
+			SetFrameColor(_auto.Status.StartsWith("Checking") ? "#FBBF24" : "#4ADE80");
+		}
+		catch (Exception ex) { _liveStatus.Text = AppState.FriendlyError(ex); }
+	}
+
+	/// <summary>Finds the card a scan shows, trying the likely games in order.</summary>
+	async Task<Card> FindCardAsync(ScanResult scan)
+	{
+		var games = !_autoDetect ? new List<Game> { AppState.Game }
+			: scan.GameConfident ? scan.GameGuesses.Take(1).ToList()
+			: new[] { AppState.Game }.Concat(scan.GameGuesses.Where(g => g != AppState.Game)).ToList();
+		foreach (var g in games)
+		{
+			var found = await CardMatcher.FindBestAsync(AppState.Sources[g], scan, g);
+			if (found != null) return found;
+		}
+		return null;
+	}
 
 	void SetBusy(bool busy, string message = null)
 	{
@@ -108,17 +215,7 @@ public class ScanPage : ContentPage
 				return;
 			}
 
-			var games = !_autoDetect ? new List<Game> { AppState.Game }
-				: scan.GameConfident ? scan.GameGuesses.Take(1).ToList()
-				: new[] { AppState.Game }.Concat(scan.GameGuesses.Where(g => g != AppState.Game)).ToList();
-
-			Card found = null;
-			foreach (var g in games)
-			{
-				found = await CardMatcher.FindBestAsync(AppState.Sources[g], scan, g,
-					cand => MainThread.BeginInvokeOnMainThread(() => _status.Text = $"Looking up \"{cand}\" in {GameInfo.Short(g)}..."));
-				if (found != null) break;
-			}
+			var found = await FindCardAsync(scan);
 			if (found == null)
 			{
 				SetBusy(false, "No matching card. Try again in better light, or type the name.");
@@ -183,6 +280,7 @@ public class ScanPage : ContentPage
 
 	Task UndoLast()
 	{
+		_auto.Reset();
 		var e = _last;
 		var lib = AppState.Data.Libraries.Values.FirstOrDefault(l => e != null && l.Entries.ContainsValue(e));
 		if (lib == null) { _status.Text = "Nothing to undo."; return Task.CompletedTask; }

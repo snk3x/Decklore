@@ -23,6 +23,10 @@ public class ScanResult
     public PrintHint PokemonHint { get; set; } = new();
     public PrintHint YugiohHint { get; set; } = new();
     public PrintHint GundamHint { get; set; } = new();
+    /// <summary>How many typical card-game clues were found ("Creature", "HP", "ATK/", "Cost"...), per game.</summary>
+    public Dictionary<Game, int> GameScores { get; set; } = new();
+    /// <summary>The strongest game evidence; ordinary text (labels, posters) scores 0 or 1.</summary>
+    public int CardEvidence => GameScores.Count == 0 ? 0 : GameScores.Values.Max();
 
     public PrintHint HintFor(Game g) => g switch
     {
@@ -187,11 +191,13 @@ public static class CardText
             [Game.Magic] = Count(@"\bCREATURE\b", @"\bINSTANT\b", @"\bSORCERY\b", @"\bENCHANTMENT\b", @"\bARTIFACT\b", @"\bPLANESWALKER\b",
                                  @"ILLUS\.", @"WIZARDS OF THE COAST", @"\bLEGENDARY\b", @"\bFLYING\b", @"\bTRAMPLE\b"),
             [Game.Cyberpunk] = Count(@"\bRAM\b", @"€\s?\$", @"\bEDDIES?\b", @"GO SOLO", @"\bCALL\}", @"\bGIGS?\b", @"NETRUNNER",
-                                     @"CYBERPUNK", @"WEIRDCO", @"CD PROJEKT", @"\{(PLAY|SPEND|CALL)\}", @"NIGHT CITY", @"\bRIVAL\b"),
+                                     @"CYBERPUNK", @"WEIRDCO", @"CD PROJEKT", @"\{(PLAY|SPEND|CALL)\}", @"NIGHT CITY", @"\bRIVAL\b",
+                                     @"\b(UNIT|PROGRAM|GEAR|LEGEND)\b", @"ILLUST\."),
             [Game.Gundam] = Count(@"GUNDAM", @"BANDAI", @"SUNRISE", @"\bDEPLOY\b", @"WHEN PAIRED", @"\bBURST\b", @"\bBLOCKER\b",
                                   @"\bREPAIR\b", @"\bBREACH\b", @"\bLV\.\s?\d", @"ACTIVATE\W{0,2}MAIN", @"EARTH FEDERATION", @"ZEON",
                                   @"\bPILOT\b", @"\b[A-Z]{2}[0-9OIL]{2}\s?-\s?[0-9OILSG]{3}", @"\bCOST\b", @"\bTRAIT", @"\bLINK\b"),
         };
+        r.GameScores = scores;
         var ordered = scores.OrderByDescending(kv => kv.Value).ToList();
         r.GameConfident = ordered[0].Value >= 2 && ordered[0].Value > ordered[1].Value;
         r.GameGuesses = ordered.Select(kv => kv.Key).ToList();

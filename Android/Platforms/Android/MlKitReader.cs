@@ -22,10 +22,29 @@ public static class MlKitReader
 	public static async System.Threading.Tasks.Task<ScanResult> ReadAsync(string photoPath)
 	{
 		using var bitmap = LoadUpright(photoPath, 2600);
-		var lines = await RecognizeAsync(bitmap);
-		if (lines.Count == 0) return CardText.Analyze(lines, lines, lines, lines);
+		return ToScan(await RecognizeAsync(InputImage.FromBitmap(bitmap, 0)));
+	}
 
-		// The card fills most of a good photo; use the area covered by text as the card's outline.
+	/// <summary>Reads one live camera frame (already rotated upright by ML Kit using the frame's rotation).</summary>
+	public static async System.Threading.Tasks.Task<ScanResult> ReadFrameAsync(Android.Media.Image frame, int rotationDegrees)
+	{
+		var lines = await RecognizeAsync(InputImage.FromMediaImage(frame, rotationDegrees));
+		// Only text inside the guide frame (the middle of the view) counts; ignore labels and screens around it.
+		bool sideways = rotationDegrees is 90 or 270;
+		double w = sideways ? frame.Height : frame.Width, h = sideways ? frame.Width : frame.Height;
+		var inside = lines.Where(l =>
+		{
+			if (l.Words.Count == 0) return false;
+			double cx = l.Words.Average(x => x.X + x.Width / 2), cy = l.Words.Average(x => x.Y + x.Height / 2);
+			return cx > w * 0.08 && cx < w * 0.92 && cy > h * 0.10 && cy < h * 0.90;
+		}).ToList();
+		return ToScan(inside);
+	}
+
+	/// <summary>Splits the text into the regions the shared CardText expects, using the text's own outline as the card.</summary>
+	static ScanResult ToScan(List<TextLine> lines)
+	{
+		if (lines.Count == 0) return CardText.Analyze(lines, lines, lines, lines);
 		double top = lines.Min(l => l.Top);
 		double bottom = lines.Max(l => l.Words.Count == 0 ? l.Top : l.Words.Max(w => w.Y + w.Height));
 		double h = Math.Max(1, bottom - top);
@@ -35,9 +54,8 @@ public static class MlKitReader
 		return CardText.Analyze(lines, topBand, lower, strip);
 	}
 
-	static async System.Threading.Tasks.Task<List<TextLine>> RecognizeAsync(Bitmap bitmap)
+	static async System.Threading.Tasks.Task<List<TextLine>> RecognizeAsync(InputImage image)
 	{
-		var image = InputImage.FromBitmap(bitmap, 0);
 		var listener = new TaskListener();
 		Recognizer.Process(image).AddOnSuccessListener(listener).AddOnFailureListener(listener);
 		var result = (await listener.Task).JavaCast<MlText>();
