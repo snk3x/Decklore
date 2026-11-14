@@ -23,6 +23,23 @@ To update it after the code changes, double-click **Install or update.cmd** in t
 
 Needs Windows 10 or 11, the .NET 10 runtime, an internet connection, and English in Windows language settings (for text recognition).
 
+## Android version (in progress)
+
+An Android app with the same features lives in the `Android` folder: take or choose a card photo (text is read on the phone with Google ML Kit), Collection, Deck, Learn and Settings tabs. It isn't released yet. To build it you need the .NET 10 SDK with the `maui-android` workload:
+
+```
+dotnet workload install maui-android
+dotnet build Android\TcgMobile.csproj -c Release
+```
+
+## Project layout
+
+| Folder | What's in it |
+|---|---|
+| `Core` | Shared by both apps: card databases, prices, deck rules and optimizer, starter decks, how-to-play guides, reading card text |
+| `Windows` | The Windows app: window, webcam, Windows text recognition |
+| `Android` | The Android app: phone screens, camera photos, ML Kit text recognition |
+
 ## Use it
 
 1. **Scan cards.** Click Start camera, hold one card flat inside the green frame with the name above the dashed line, and press F5. You can also load a photo or type a name. The game is detected automatically.

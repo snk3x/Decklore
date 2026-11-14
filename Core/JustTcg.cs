@@ -40,32 +40,68 @@ public static class JustTcg
     static readonly Dictionary<Game, PriceCache> _caches = new();
     static readonly SemaphoreSlim _lock = new(1, 1);
 
-    // ------------------------------------------------------------------ API key (encrypted for this Windows user)
+    // ------------------------------------------------------------------ API key
 
-    public static bool HasKey => File.Exists(KeyFile);
+    /// <summary>Where the API key is kept. Windows encrypts it for the signed-in user; Android sets its secure storage.</summary>
+    public interface ISecretStore
+    {
+        string Load();
+        void Save(string value);
+        void Remove();
+    }
+
+    /// <summary>Windows: the key file is encrypted with DPAPI, so only this Windows account can read it.</summary>
+    sealed class DpapiSecretStore : ISecretStore
+    {
+        public string Load()
+        {
+            try
+            {
+                if (!OperatingSystem.IsWindows() || !File.Exists(KeyFile)) return null;
+                var plain = ProtectedData.Unprotect(File.ReadAllBytes(KeyFile), Entropy, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(plain);
+            }
+            catch { return null; }
+        }
+
+        public void Save(string value)
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Set JustTcg.Secrets for this platform.");
+            Directory.CreateDirectory(Dir);
+            File.WriteAllBytes(KeyFile, ProtectedData.Protect(Encoding.UTF8.GetBytes(value), Entropy, DataProtectionScope.CurrentUser));
+        }
+
+        public void Remove()
+        {
+            if (File.Exists(KeyFile)) File.Delete(KeyFile);
+        }
+    }
+
+    public static ISecretStore Secrets { get; set; } = new DpapiSecretStore();
+
+    static string _key;
+    static bool _keyLoaded;
+
+    public static bool HasKey => !string.IsNullOrEmpty(LoadKey());
 
     public static string LoadKey()
     {
-        try
-        {
-            if (!File.Exists(KeyFile)) return null;
-            var plain = ProtectedData.Unprotect(File.ReadAllBytes(KeyFile), Entropy, DataProtectionScope.CurrentUser);
-            return Encoding.UTF8.GetString(plain);
-        }
-        catch { return null; }
+        if (!_keyLoaded) { _key = Secrets.Load(); _keyLoaded = true; }
+        return _key;
     }
 
     public static void SaveKey(string key)
     {
-        Directory.CreateDirectory(Dir);
-        File.WriteAllBytes(KeyFile, ProtectedData.Protect(Encoding.UTF8.GetBytes(key.Trim()), Entropy, DataProtectionScope.CurrentUser));
+        Secrets.Save(key.Trim());
+        _keyLoaded = false;
         _caches.Clear();
         _gundam = null;
     }
 
     public static void RemoveKey()
     {
-        if (File.Exists(KeyFile)) File.Delete(KeyFile);
+        Secrets.Remove();
+        _keyLoaded = false;
         foreach (var g in Games.Keys)
             if (File.Exists(CacheFile(g))) File.Delete(CacheFile(g));
         _caches.Clear();

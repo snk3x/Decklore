@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace TcgScanner;
 
-static class Http
+public static class Http
 {
     public static readonly HttpClient Client = Create();
 
@@ -39,7 +39,7 @@ static class Http
     }
 }
 
-static class Json
+public static class Json
 {
     public static JsonElement O(this JsonElement e, string p) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) ? v : default;
@@ -87,7 +87,7 @@ public interface ICardSource
     Task<List<Card>> PrintingsAsync(Card card, CancellationToken ct = default);
 }
 
-static class TextUtil
+public static class TextUtil
 {
     public static string Norm(string s)
     {

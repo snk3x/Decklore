@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Core/">
+    <Project Path="Core/TcgCore.csproj" />
+  </Folder>
+  <Folder Name="/Windows/">
+    <Project Path="Windows/TcgScanner.csproj" />
+  </Folder>
+</Solution>

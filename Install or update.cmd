@@ -15,7 +15,7 @@ echo.
 taskkill /im "TCG deck scanner.exe" /f >nul 2>&1
 
 echo  Building the app (this takes about a minute)...
-dotnet publish "%SRC%TcgScanner.csproj" -c Release -o "%DEST%" --nologo -v q
+dotnet publish "%SRC%Windows\TcgScanner.csproj" -c Release -o "%DEST%" --nologo -v q
 if errorlevel 1 (
     echo.
     echo  The build failed. Make sure the .NET 10 SDK is installed, then try again.
