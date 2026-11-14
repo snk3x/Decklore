@@ -20,6 +20,7 @@ public class ScanPage : ContentPage
 	readonly Button _liveButton;
 	readonly AutoScanSession _auto = new();
 	bool _liveWanted = true, _permissionAsked;
+	bool _sound = Preferences.Default.Get("scan-sound", true);
 	bool _autoDetect = true, _addToDeck, _working;
 	LibraryEntry _last;
 	bool _lastToDeck;
@@ -69,8 +70,14 @@ public class ScanPage : ContentPage
 					Ui.Title("Scan cards"),
 					Ui.GamePicker(),
 					liveArea,
-					Ui.Note("Hold one card flat inside the frame. It's added automatically; swap in the next card when the phone vibrates."),
+					Ui.Note("Hold one card flat inside the frame. It's added automatically; swap in the next card when you hear the beep."),
 					_liveButton,
+					Ui.Toggle("Beep when a card is added", _sound, v =>
+					{
+						_sound = v;
+						Preferences.Default.Set("scan-sound", v);
+						if (v) AddedFeedback.Play(true); // let the user hear it right away
+					}),
 					Ui.Row(Ui.Secondary("Take photo", () => Scan(fromCamera: true)), Ui.Secondary("Choose photo", () => Scan(fromCamera: false))),
 					new Grid
 					{
@@ -150,7 +157,7 @@ public class ScanPage : ContentPage
 			if (card != null)
 			{
 				AddCard(card);
-				try { HapticFeedback.Default.Perform(HapticFeedbackType.LongPress); } catch { }
+				AddedFeedback.Play(_sound);
 				SetFrameColor("#00FF78");
 				_frame.StrokeThickness = 9;
 				await Task.Delay(700);
