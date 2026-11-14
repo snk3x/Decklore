@@ -2,7 +2,14 @@
 
 A Windows app that scans trading cards with a webcam, keeps track of your collection and its value, and builds or fixes a deck for Magic: The Gathering, Pokémon TCG, Yu-Gi-Oh!, the Cyberpunk TCG, or the Gundam Card Game.
 
-## Install
+## Download (easiest)
+
+1. Go to the [latest release](https://github.com/snk3x/TCGDeckScanner/releases/latest) and download the zip.
+2. Unzip it and double-click **TCG deck scanner.exe**. Nothing else to install; it includes everything it needs.
+
+Windows may show "Windows protected your PC" because the app isn't signed with a paid certificate. Click **More info**, then **Run anyway**.
+
+## Install from source
 
 1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download) (Windows 10 or 11).
 2. Download this project: click **Code → Download ZIP** on GitHub and unzip it, or run `git clone`.
