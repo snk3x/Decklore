@@ -1,0 +1,11 @@
+# Build output
+bin/
+obj/
+*.user
+.vs/
+
+# Never commit personal data or keys (the app keeps these in %APPDATA%, but just in case)
+Card library*.json
+*prices.json
+*key.dat
+Gundam cards.json
