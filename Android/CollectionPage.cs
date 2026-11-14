@@ -21,14 +21,14 @@ public class CollectionPage : ContentPage
 		_list = new CollectionView
 		{
 			SelectionMode = SelectionMode.None,
-			EmptyView = new Label { Text = "No cards yet. Scan some on the Scan tab.", Margin = 20, TextColor = Ui.Muted },
+			EmptyView = new Label { Text = "No cards yet. Scan some on the Scan tab.", Margin = 20 }.MutedText(),
 			ItemTemplate = new DataTemplate(() =>
 			{
 				var name = new Label { FontAttributes = FontAttributes.Bold, LineBreakMode = LineBreakMode.TailTruncation };
 				name.SetBinding(Label.TextProperty, nameof(Row.Name));
-				var detail = new Label { FontSize = 12, TextColor = Ui.Muted };
+				var detail = new Label { FontSize = 12 }.MutedText();
 				detail.SetBinding(Label.TextProperty, nameof(Row.Detail));
-				var price = new Label { FontAttributes = FontAttributes.Bold, VerticalOptions = LayoutOptions.Center, TextColor = Ui.Good };
+				var price = new Label { FontAttributes = FontAttributes.Bold, VerticalOptions = LayoutOptions.Center }.GoodText();
 				price.SetBinding(Label.TextProperty, nameof(Row.Price));
 				var grid = new Grid
 				{

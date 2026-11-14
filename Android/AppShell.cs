@@ -15,5 +15,10 @@ public class AppShell : Shell
 		Items.Add(tabs);
 	}
 
-	static ShellContent Tab(string title, string icon, Page page) => new() { Title = title, Icon = icon, Content = page };
+	static ShellContent Tab(string title, string icon, Page page)
+	{
+		// Each page shows its own large title, so hide the extra bar at the top.
+		Shell.SetNavBarIsVisible(page, false);
+		return new() { Title = title, Icon = icon, Content = page };
+	}
 }

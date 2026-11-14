@@ -41,7 +41,7 @@ public class LearnPage : ContentPage
 		_body.Children.Add(new Label { Text = guide.Intro });
 		foreach (var (heading, lines) in guide.Sections)
 		{
-			_body.Children.Add(new Label { Text = heading, FontSize = 18, FontAttributes = FontAttributes.Bold, TextColor = Ui.Accent, Margin = new Thickness(0, 10, 0, 0) });
+			_body.Children.Add(new Label { Text = heading, FontSize = 18, FontAttributes = FontAttributes.Bold, Margin = new Thickness(0, 10, 0, 0) }.AccentText());
 			foreach (var line in lines)
 			{
 				bool bullet = line.StartsWith("• ");

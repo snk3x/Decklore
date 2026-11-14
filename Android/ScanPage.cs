@@ -11,7 +11,7 @@ public class ScanPage : ContentPage
 	readonly Image _image = new() { HeightRequest = 340, Aspect = Aspect.AspectFit };
 	readonly Label _cardName = new() { FontSize = 19, FontAttributes = FontAttributes.Bold };
 	readonly Label _cardInfo = Ui.Note();
-	readonly Label _cardValue = new() { FontSize = 16, FontAttributes = FontAttributes.Bold, TextColor = Ui.Good };
+	readonly Label _cardValue = new Label { FontSize = 16, FontAttributes = FontAttributes.Bold }.GoodText();
 	readonly Label _session = Ui.Note();
 	readonly Border _result;
 	bool _autoDetect = true, _addToDeck, _working;
@@ -54,7 +54,11 @@ public class ScanPage : ContentPage
 					},
 					Ui.Toggle("Detect the game automatically", true, v => _autoDetect = v),
 					Ui.Toggle("Also add scanned cards to the deck", false, v => _addToDeck = v),
-					new HorizontalStackLayout { Spacing = 8, Children = { _busy, _status } },
+					new Grid
+					{
+						ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star) }, ColumnSpacing = 8,
+						Children = { _busy, WithColumn(_status, 1) }
+					},
 					_result,
 					_session,
 				}
