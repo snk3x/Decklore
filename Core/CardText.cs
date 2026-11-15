@@ -63,7 +63,39 @@ public static class CardMatcher
             if (score > bestScore) { bestScore = score; best = card; }
             if (score >= 0.92) break;
         }
+        // Pokémon: when no name could be read, the printed number and set size ("066/128") can still find the card.
+        if (best == null && game == Game.Pokemon && source is TcgdexSource dex)
+        {
+            var byNumber = await dex.FindByNumberAsync(scan.PokemonHint, ct);
+            if (byNumber != null) return byNumber;
+        }
+        // A weak guess is worse than "no match": the user can retry or type the name.
+        if (best == null || (!best.ExactPrinting && bestScore < 0.5)) return null;
+        if (game == Game.Pokemon) best = await PokemonVariantAsync(source, best, scan, ct);
         return best;
+    }
+
+    /// <summary>
+    /// The "ex", "V", "VMAX" and "VSTAR" in Pokémon names are stylized symbols that text recognition can't read, so
+    /// "Charizard ex" reads as "Charizard". The rule box gives it away: "your opponent takes 2 Prize cards" means
+    /// ex, V or VSTAR, and "3 Prize cards" means VMAX. Try those and keep the one matching the printed card number.
+    /// </summary>
+    static async Task<Card> PokemonVariantAsync(ICardSource source, Card card, ScanResult scan, CancellationToken ct)
+    {
+        if (card.Category != "Pokemon" || Regex.IsMatch(card.Name, @"\b(ex|EX|GX|V|VMAX|VSTAR)$")) return card;
+        string t = scan.FullText;
+        string[] suffixes = Regex.IsMatch(t, @"(?i)takes\s+3\s+prize") ? new[] { "VMAX" }
+                          : Regex.IsMatch(t, @"(?i)takes\s+2\s+prize|pok[eé]mon\s+rule") ? new[] { "ex", "V", "VSTAR" }
+                          : Array.Empty<string>();
+        Card first = null;
+        foreach (var suffix in suffixes)
+        {
+            var variant = await source.FindAsync($"{card.Name} {suffix}", scan.HintFor(Game.Pokemon), ct);
+            if (variant == null || !variant.Name.StartsWith(card.Name, StringComparison.OrdinalIgnoreCase)) continue;
+            if (variant.ExactPrinting) return variant;
+            first ??= variant;
+        }
+        return first ?? card;
     }
 
     /// <summary>How well a card's name parts (name, and subtitle after ':') match the text read from the card, 0 to 1.</summary>
@@ -139,6 +171,13 @@ public static class CardText
         "command", "base", "resource", "stag", "stage", "basic", "trainer", "supporter", "item", "energy", "pokemon tool",
         "pokémon tool", "creature", "instant", "sorcery", "land", "enchantment", "artifact", "token", "ex", "cos", "cosr",
         "a cost", "link", "trait", "lv", "ap", "hp",
+        // Pokémon labels and section headings
+        "ability", "attack", "weakness", "resistance", "retreat", "evolves", "stage 1", "stage 2", "tool", "stadium",
+        "rule", "pokémon", "pokemon", "trainer card", "basic energy", "special energy",
+        // Yu-Gi-Oh attribute icons and frame words
+        "fire", "water", "earth", "wind", "light", "dark", "divine", "effect", "normal", "fusion", "synchro", "xyz",
+        // Gundam timing words
+        "action", "main", "burst", "deploy", "attack", "when paired",
     };
 
     static bool IsLabel(string c) =>
@@ -195,7 +234,8 @@ public static class CardText
                                      @"\b(UNIT|PROGRAM|GEAR|LEGEND)\b", @"ILLUST\."),
             [Game.Gundam] = Count(@"GUNDAM", @"BANDAI", @"SUNRISE", @"\bDEPLOY\b", @"WHEN PAIRED", @"\bBURST\b", @"\bBLOCKER\b",
                                   @"\bREPAIR\b", @"\bBREACH\b", @"\bLV\.\s?\d", @"ACTIVATE\W{0,2}MAIN", @"EARTH FEDERATION", @"ZEON",
-                                  @"\bPILOT\b", @"\b[A-Z]{2}[0-9OIL]{2}\s?-\s?[0-9OILSG]{3}", @"\bCOST\b", @"\bTRAIT", @"\bLINK\b"),
+                                  @"\bPILOT\b", @"\b[A-Z]{2}[0-9OIL]{2}\s?-\s?[0-9OILSG]{3}", @"\bCOST\b", @"\bTRAIT", @"\bLINK\b",
+                                  @"\b(UNIT|COMMAND)\b", @"\bACTION\b", @"\bFRIENDLY\b", @"\bENEMY\b"),
         };
         r.GameScores = scores;
         var ordered = scores.OrderByDescending(kv => kv.Value).ToList();

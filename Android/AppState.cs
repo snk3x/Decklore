@@ -76,6 +76,7 @@ public static class AppState
 
 	public static string FriendlyError(Exception ex) => ex switch
 	{
+		RateLimitedException rl => rl.Message,
 		HttpRequestException or TaskCanceledException => "Couldn't reach the card database. Check your internet connection and try again.",
 		_ => ex.Message
 	};

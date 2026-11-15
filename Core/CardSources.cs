@@ -18,18 +18,73 @@ public static class Http
         return c;
     }
 
+    /// <summary>
+    /// Each card database's published limit, as the minimum gap between requests. Every request waits its turn,
+    /// even when several lookups run at once. Scryfall: name lookups and searches 2/s, everything else 10/s.
+    /// CyberpunkDB: 120/min. gcg-api: 60/min without a key. YGOPRODeck: 20/s.
+    /// </summary>
+    static readonly (string prefix, string bucket, int ms, int cooldownSeconds)[] Limits =
+    {
+        ("https://api.scryfall.com/cards/named", "scryfall-slow", 550, 30),
+        ("https://api.scryfall.com/cards/search", "scryfall-slow", 550, 30),
+        ("https://api.scryfall.com/cards/collection", "scryfall-slow", 550, 30),
+        ("https://api.scryfall.com/", "scryfall", 120, 30),
+        ("https://cyberpunkdb.com/", "cyberpunkdb", 550, 60),
+        ("https://api.gcgapi.com/", "gcgapi", 1100, 60),
+        ("https://db.ygoprodeck.com/", "ygoprodeck", 100, 60),
+        ("https://api.tcgdex.net/", "tcgdex", 50, 30),
+    };
+
+    static readonly Dictionary<string, SemaphoreSlim> _gates = new();
+    static readonly Dictionary<string, DateTime> _lastCall = new();
+    static readonly Dictionary<string, DateTime> _blockedUntil = new();
+
+    /// <summary>Waits until this service may be called again; refuses while the service has asked us to back off.</summary>
+    static async Task<string> WaitTurnAsync(string url, CancellationToken ct)
+    {
+        var rule = Limits.FirstOrDefault(l => url.StartsWith(l.prefix, StringComparison.OrdinalIgnoreCase));
+        if (rule.bucket == null) return null;
+        SemaphoreSlim gate;
+        lock (_gates)
+        {
+            if (!_gates.TryGetValue(rule.bucket, out gate)) _gates[rule.bucket] = gate = new SemaphoreSlim(1, 1);
+            if (_blockedUntil.TryGetValue(rule.bucket, out var until) && DateTime.UtcNow < until)
+                throw new RateLimitedException((int)Math.Ceiling((until - DateTime.UtcNow).TotalSeconds));
+        }
+        await gate.WaitAsync(ct);
+        try
+        {
+            DateTime last;
+            lock (_gates) last = _lastCall.GetValueOrDefault(rule.bucket);
+            var wait = last.AddMilliseconds(rule.ms) - DateTime.UtcNow;
+            if (wait > TimeSpan.Zero) await Task.Delay(wait, ct);
+            lock (_gates) _lastCall[rule.bucket] = DateTime.UtcNow;
+        }
+        finally { gate.Release(); }
+        return rule.bucket;
+    }
+
     /// <summary>Returns null for "not found" style responses; throws on network failure.</summary>
     public static async Task<JsonDocument> GetJsonAsync(string url, CancellationToken ct)
     {
         for (int attempt = 0; ; attempt++)
         {
+            string bucket = await WaitTurnAsync(url, ct);
             using var resp = await Client.GetAsync(url, ct);
             if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest) return null;
-            bool retryable = (int)resp.StatusCode >= 500 || resp.StatusCode == HttpStatusCode.TooManyRequests;
-            if (retryable && attempt < 3)
+            if (resp.StatusCode == HttpStatusCode.TooManyRequests)
             {
-                var wait = resp.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(1 + attempt * 2);
-                await Task.Delay(wait > TimeSpan.FromSeconds(15) ? TimeSpan.FromSeconds(15) : wait, ct);
+                // The service asked us to slow down: stop calling it for the time it asks (at least its stated cooldown),
+                // instead of retrying. Hammering a service after a 429 can get the app banned.
+                var rule = Limits.FirstOrDefault(l => l.bucket == bucket);
+                var wait = resp.Headers.RetryAfter?.Delta ?? TimeSpan.Zero;
+                if (wait < TimeSpan.FromSeconds(rule.cooldownSeconds)) wait = TimeSpan.FromSeconds(Math.Max(rule.cooldownSeconds, 30));
+                if (bucket != null) lock (_gates) _blockedUntil[bucket] = DateTime.UtcNow + wait;
+                throw new RateLimitedException((int)wait.TotalSeconds);
+            }
+            if ((int)resp.StatusCode >= 500 && attempt < 2)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2 << attempt), ct); // 2 s, then 4 s
                 continue;
             }
             resp.EnsureSuccessStatusCode();
@@ -37,6 +92,14 @@ public static class Http
             return await JsonDocument.ParseAsync(s, cancellationToken: ct);
         }
     }
+}
+
+/// <summary>A card database asked the app to slow down; nothing is sent to it until the wait is over.</summary>
+public class RateLimitedException : HttpRequestException
+{
+    public int Seconds { get; }
+    public RateLimitedException(int seconds)
+        : base($"The card database asked us to slow down. Try again in about {seconds} seconds.") => Seconds = seconds;
 }
 
 public static class Json
@@ -186,7 +249,6 @@ public class ScryfallSource : ICardSource
         for (int page = 0; page < 4 && !string.IsNullOrEmpty(url); page++)
         {
             using var doc = await Http.GetJsonAsync(url, ct);
-            await Task.Delay(100, ct);
             if (doc == null) break;
             list.AddRange(doc.RootElement.A("data").Select(Parse));
             url = doc.RootElement.True("has_more") ? doc.RootElement.S("next_page") : null;
@@ -194,11 +256,22 @@ public class ScryfallSource : ICardSource
         return list;
     }
 
+    // Scryfall asks apps to cache what they download (at least 24 hours); repeat lookups in a session are answered here.
+    static readonly Dictionary<string, (Card card, DateTime at)> _cache = new();
+
     static async Task<Card> Get(string url, CancellationToken ct)
     {
+        lock (_cache)
+            if (_cache.TryGetValue(url, out var hit) && DateTime.UtcNow - hit.at < TimeSpan.FromHours(24))
+                return hit.card == null ? null : JsonSerializer.Deserialize<Card>(JsonSerializer.Serialize(hit.card));
         using var doc = await Http.GetJsonAsync(url, ct);
-        await Task.Delay(100, ct); // Scryfall asks for 50-100 ms between requests
-        return doc == null ? null : Parse(doc.RootElement);
+        var card = doc == null ? null : Parse(doc.RootElement);
+        lock (_cache)
+        {
+            if (_cache.Count > 2000) _cache.Clear();
+            _cache[url] = (card, DateTime.UtcNow);
+        }
+        return card == null ? null : JsonSerializer.Deserialize<Card>(JsonSerializer.Serialize(card));
     }
 
     static Card Parse(JsonElement r)
@@ -305,6 +378,9 @@ public class TcgdexSource : ICardSource
         name = name.Trim();
         if (name.Length < 3) return null;
         var items = await ListAsync(name, ct);
+        // A stylized suffix often reads as stray letters ("Gardevoira", "Lugiav"); retry without them.
+        for (int cut = 1; items.Count == 0 && cut <= 2 && name.Length - cut >= 5; cut++)
+            items = await ListAsync(name[..^cut], ct);
         if (items.Count == 0) return null;
 
         var exact = items.Where(i => TextUtil.Norm(i.name) == TextUtil.Norm(name)).ToList();
@@ -349,6 +425,31 @@ public class TcgdexSource : ICardSource
             })
             .OrderByDescending(c => sets.GetValueOrDefault(c.SetCode)?.Order ?? -1)
             .ToList();
+    }
+
+    /// <summary>
+    /// Finds a card from its printed number and set size alone ("066/128"), for when the name can't be read.
+    /// Only answers when exactly one card in all sets of that size has that number.
+    /// </summary>
+    public async Task<Card> FindByNumberAsync(PrintHint hint, CancellationToken ct = default)
+    {
+        string num = TextUtil.Num(hint?.Number);
+        if (num == "" || !int.TryParse(hint.Total, out int total) || total <= 0) return null;
+        var sets = await SetsAsync(ct);
+        var candidates = sets.Where(kv => kv.Value.Official == total).Select(kv => kv.Key).ToList();
+        if (candidates.Count == 0 || candidates.Count > 4) return null;
+
+        var hits = new List<string>();
+        foreach (var setId in candidates)
+        {
+            using var doc = await Http.GetJsonAsync(Base + "sets/" + Uri.EscapeDataString(setId), ct);
+            if (doc == null) continue;
+            hits.AddRange(doc.RootElement.A("cards").Where(c => TextUtil.Num(c.S("localId")) == num).Select(c => c.S("id")));
+        }
+        if (hits.Count != 1) return null;
+        var card = await DetailAsync(hits[0], ct);
+        if (card != null) card.ExactPrinting = true;
+        return card;
     }
 
     public async Task<Card> BasicEnergyAsync(string type, CancellationToken ct = default)
@@ -486,8 +587,14 @@ public class YgoSource : ICardSource
     {
         name = name.Trim();
         if (name.Length < 3) return null;
-        return await Query("name=" + Uri.EscapeDataString(name), name, hint, ct)
-               ?? await Query("fname=" + Uri.EscapeDataString(name), name, hint, ct);
+        var card = await Query("name=" + Uri.EscapeDataString(name), name, hint, ct)
+                   ?? await Query("fname=" + Uri.EscapeDataString(name), name, hint, ct);
+        if (card != null) return card;
+        // Long names lose small words or symbols when read ("ASH BLOSSOM OYOUS SPRING"); search by the first two words.
+        var words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Count(char.IsLetter) >= 3).ToList();
+        if (words.Count >= 3)
+            card = await Query("fname=" + Uri.EscapeDataString(words[0] + " " + words[1]), name, hint, ct);
+        return card != null && TextUtil.Ratio(card.Name, name) >= 0.6 ? card : null;
     }
 
     public Task<Card> RefreshAsync(Card card, CancellationToken ct = default) =>
@@ -742,6 +849,18 @@ public class GundamSource : ICardSource
 
     static bool IsBase(Card c) => !c.Id.Contains("_p");
 
+    /// <summary>
+    /// A card number can be misread as another real number, so a number match also needs some agreement from
+    /// the name that was read (even a fragment like "ogg" for "Hy-Gogg").
+    /// </summary>
+    static bool Supports(string cardName, string read)
+    {
+        // Text recognition often reads "m" as "rn" ("Barzam" as "Barzarn").
+        string a = TextUtil.Norm(cardName), b = TextUtil.Norm(read).Replace("rn", "m");
+        if (b.Length >= 3 && a.Contains(b)) return true;
+        return TextUtil.Ratio(cardName, read) >= 0.45;
+    }
+
     /// <summary>Name similarity that also credits a partly read name ("ess Flyer" for "Daughtress Flyer").</summary>
     static double NameScore(string cardName, string read)
     {
@@ -769,7 +888,8 @@ public class GundamSource : ICardSource
                 .Select(c => c.Number).Distinct()
                 .Select(n => (n, dist: n.Take(prefix.Length).Zip(prefix).Count(p => p.First != p.Second)))
                 .OrderBy(x => x.dist).ToList();
-            if (closest.Count > 0 && closest[0].dist <= 1 && (closest.Count == 1 || closest[1].dist > closest[0].dist))
+            if (closest.Count > 0 && closest[0].dist <= 1 && (closest.Count == 1 || closest[1].dist > closest[0].dist) &&
+                Supports(cards.First(c => c.Number == closest[0].n).Name, name))
             {
                 var hit = Clone(cards.Where(c => c.Number == closest[0].n).OrderByDescending(IsBase).First());
                 hit.ExactPrinting = closest[0].dist == 0;
@@ -789,6 +909,7 @@ public class GundamSource : ICardSource
             {
                 var hit = cards.Where(c => c.Number == n).OrderByDescending(IsBase).First();
                 if (ratio < 1 && NameScore(hit.Name, name) < 0.6) continue;
+                if (!Supports(hit.Name, name)) continue;
                 var exact = Clone(hit);
                 exact.ExactPrinting = ratio >= 1;
                 await JustTcg.ApplyAsync(exact, ct);

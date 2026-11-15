@@ -1201,6 +1201,7 @@ public class MainForm : Form
     {
         string msg = ex switch
         {
+            RateLimitedException rl => rl.Message,
             HttpRequestException or TaskCanceledException => "Could not reach the card database. Check your internet connection and try again.",
             _ => ex.Message
         };
