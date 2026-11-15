@@ -110,6 +110,10 @@ Your collection is saved to `%APPDATA%\TCG deck scanner\Card library.json`.
 
 Card data comes from Scryfall, TCGdex, YGOPRODeck, CyberpunkDB (an unofficial fan database built on the official card data), and gcg-api. Legality and banlists are live from those services. Gundam data contains data from gcg-api (https://gcgapi.com), made available under the Open Database License (ODbL) v1.0.
 
+## Credits
+
+Thanks to Levi for field testing the app and suggesting improvements.
+
 ## Limits
 
 - Pokémon, Cyberpunk and Gundam ratings are heuristics because those databases have no play-rate data.

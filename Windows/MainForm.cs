@@ -894,7 +894,7 @@ public class MainForm : Form
     {
         using var f = new Form
         {
-            Text = "Settings", Width = 620, Height = 380, StartPosition = FormStartPosition.CenterParent,
+            Text = "Settings", Width = 620, Height = 560, StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, Font = Font
         };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1 };
@@ -954,7 +954,17 @@ public class MainForm : Form
             result.Text = "Key removed.";
         };
 
-        layout.Controls.AddRange(new Control[] { title, info, link, keyBox, buttons, result });
+        var aboutTitle = new Label { Text = "About", AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(3, 18, 3, 3) };
+        string version = Application.ProductVersion.Split('+')[0];
+        var about = new Label
+        {
+            AutoSize = true, MaximumSize = new Size(570, 0),
+            Text = $"TCG deck scanner {version}. An unofficial fan project, not affiliated with the companies behind these games.\n\n" +
+                   "Thanks to Levi for field testing the app and suggesting improvements.\n\n" +
+                   "Card data: Scryfall, TCGdex, YGOPRODeck, CyberpunkDB, and gcg-api (https://gcgapi.com, Open Database License). " +
+                   "Prices: TCGplayer via those services and JustTCG."
+        };
+        layout.Controls.AddRange(new Control[] { title, info, link, keyBox, buttons, result, aboutTitle, about });
         f.Controls.Add(layout);
         f.CancelButton = close;
         f.ShowDialog(this);

@@ -28,6 +28,7 @@ public class SettingsPage : ContentPage
 					_result,
 					Ui.Heading("About"),
 					new Label { Text = $"TCG deck scanner {AppInfo.Current.VersionString}. An unofficial fan project, not affiliated with the companies behind these games." },
+					new Label { Text = "Thanks to Levi for field testing the app and suggesting improvements." },
 					Ui.Note("Card data: Scryfall, TCGdex, YGOPRODeck, CyberpunkDB, and gcg-api (https://gcgapi.com, Open Database License). Prices: TCGplayer via those services and JustTCG. Text recognition runs on your phone with Google ML Kit."),
 					Ui.Secondary("Project on GitHub", () => Ui.OpenUrl("https://github.com/snk3x/TCGDeckScanner")),
 				}
