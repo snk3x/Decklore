@@ -50,9 +50,9 @@ dotnet build Android\TcgMobile.csproj -c Release
 3. **Deck.** Pick the format at the top, then:
    - **Analyze** checks the deck against the format's rules and gives a health score.
    - **Optimize from my collection** rebuilds the deck using only cards you own, plus free basic lands or basic Energy.
-   - **Budget swaps** looks at deck cards above a max price you set and suggests a cheaper printing of the same card, or (Magic, Gundam, Cyberpunk) a cheaper card that does a similar job. Tick the swaps you want; swapped-in cards you don't own become loaners, so the loaner list doubles as a shopping list.
+   - **Upgrades** (Magic, Gundam, Cyberpunk) finds the weakest cards in your deck and lists up to three stronger cards for each that do a similar job, strongest first, with prices. Your deck is not changed. Tick the ones you want and press **Add checked to wishlist** to save them as loaners, then press **Loaner picks** to see the deck with them.
    - **Loaner picks** compares the best deck from your owned cards with the best deck using your loaners too, and lists which loaners would help and what they'd replace. Nothing changes unless you choose to use that deck.
-   - **Undo optimize** puts the previous deck back (also after budget swaps and loaner picks).
+   - **Undo optimize** puts the previous deck back (also after Loaner picks).
    - **Import list** and **Export list** handle plain text decklists.
    - **Starter decks** (Gundam only) lists starter decks ST01 to ST14 and shows how many of each deck's cards you've scanned, highlighting the likely match. Pick yours to build its 50-card deck and 10-card Resource Deck in one click, and optionally add the box's cards to your collection. Then scan your booster cards and press Optimize to upgrade it.
 4. **How to play.** A beginner's guide to the game picked at the top: how to win, setup, turn steps, card types, combat and key terms, with a link to the official rules.

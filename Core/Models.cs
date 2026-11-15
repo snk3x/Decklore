@@ -135,8 +135,6 @@ public class AppData
     public Dictionary<Game, Library> Libraries { get; set; } = new();
     public Dictionary<Game, string> Formats { get; set; } = new();
     public Game LastGame { get; set; }
-    /// <summary>Budget swaps suggest replacements for deck cards above this price (US dollars).</summary>
-    public double BudgetLimit { get; set; } = 5;
 
     public Library Get(Game g)
     {

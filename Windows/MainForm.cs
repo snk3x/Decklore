@@ -256,7 +256,7 @@ public class MainForm : Form
         {
             Btn("Analyze", (s, e) => Analyze()),
             _optimizeBtn,
-            Btn("Budget swaps...", async (s, e) => await ShowBudgetSwaps()),
+            Btn("Upgrades...", async (s, e) => await ShowUpgrades()),
             Btn("Loaner picks", async (s, e) => await ShowLoanerPicks()),
             _starterBtn,
             Btn("Undo optimize", (s, e) => UndoOptimize()),
@@ -1160,127 +1160,100 @@ public class MainForm : Form
         SetStatus(rows.Count == 1 ? $"{rows[0].Card.Name} is now owned." : $"{rows.Count} loaner cards are now owned.");
     }
 
-    async Task ShowBudgetSwaps()
+    async Task ShowUpgrades()
     {
         if (_busy) return;
-        if (Lib.DeckCount == 0) { SetStatus("Build a deck first. Budget swaps look at the cards in your deck."); return; }
+        if (Lib.DeckCount == 0) { SetStatus("Build a deck first. Upgrades look at the cards in your deck."); return; }
+        if (!UpgradeAdvisor.Supports(CurrentGame))
+        {
+            MessageBox.Show(this, $"Upgrades are available for Magic, Gundam and Cyberpunk. {GameInfo.Short(CurrentGame)} card effects are too specific " +
+                                  "to match safely, so use Optimize and Loaner picks for this game.", "Upgrades", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
         using var dlg = new Form
         {
-            Text = "Budget swaps", Width = 860, Height = 560, StartPosition = FormStartPosition.CenterParent,
+            Text = "Upgrades", Width = 900, Height = 580, StartPosition = FormStartPosition.CenterParent,
             MinimizeBox = false, ShowIcon = false, Font = Font,
         };
-        var top = Flow();
-        var max = new NumericUpDown { Minimum = 0.25m, Maximum = 1000, DecimalPlaces = 2, Increment = 1, Width = 80,
-                                      Value = (decimal)Math.Clamp(_data.BudgetLimit, 0.25, 1000), Margin = new Padding(3, 7, 3, 3) };
-        var info = new Label { AutoSize = true, Margin = new Padding(12, 10, 3, 3), ForeColor = Color.DimGray };
-        var list = new ListView { Dock = DockStyle.Fill, View = View.Details, CheckBoxes = true, FullRowSelect = true, GridLines = true };
-        list.Columns.Add("Replace", 190);
-        list.Columns.Add("Price", 70, HorizontalAlignment.Right);
-        list.Columns.Add("With", 190);
-        list.Columns.Add("Price", 70, HorizontalAlignment.Right);
-        list.Columns.Add("Why", 300);
-        // One choice per card: checking an option unchecks the other options for the same card.
-        list.ItemChecked += (s, e) =>
-        {
-            if (!e.Item.Checked || e.Item.Tag is not (BudgetSwap swap, SwapOption)) return;
-            foreach (ListViewItem other in list.Items)
-                if (other != e.Item && other.Checked && other.Tag is (BudgetSwap os, SwapOption) && os == swap) other.Checked = false;
-        };
-        var find = new Button { Text = "Find swaps", AutoSize = true, Height = 30 };
-        top.Controls.AddRange(new Control[] { Lbl("Max price per card $"), max, find, info });
+        var info = new Label { Dock = DockStyle.Top, Height = 34, Padding = new Padding(8, 9, 8, 0), ForeColor = Color.DimGray,
+                               Text = "Looking for stronger cards for the weakest cards in your deck..." };
+        var list = new ListView { Dock = DockStyle.Fill, View = View.Details, CheckBoxes = true, FullRowSelect = true, GridLines = true,
+                                  ShowItemToolTips = true };
+        list.Columns.Add("Weak card in your deck", 200);
+        list.Columns.Add("Recommended upgrade", 220);
+        list.Columns.Add("Price", 75, HorizontalAlignment.Right);
+        list.Columns.Add("Why", 360);
 
         var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(4) };
-        var apply = new Button { Text = "Apply checked swaps", AutoSize = true, Height = 30, Enabled = false };
+        var save = new Button { Text = "Add checked to wishlist", AutoSize = true, Height = 30, Enabled = false };
         var close = new Button { Text = "Close", AutoSize = true, Height = 30, DialogResult = DialogResult.Cancel };
         bottom.Controls.Add(close);
-        bottom.Controls.Add(apply);
+        bottom.Controls.Add(save);
         bottom.Controls.Add(new Label { AutoSize = true, Margin = new Padding(3, 9, 12, 0), ForeColor = Color.DimGray,
-                                        Text = "Nothing changes until you apply. Swapped-in cards you don't own become loaners." });
+                                        Text = "Your deck doesn't change. Wishlist cards are saved as loaners; Loaner picks tests them in the deck." });
         dlg.Controls.Add(list);
         dlg.Controls.Add(bottom);
-        dlg.Controls.Add(top);
+        dlg.Controls.Add(info);
         dlg.CancelButton = close;
 
         var game = CurrentGame;
         var lib = Lib;
         string format = Format;
         var rules = Rules;
-        List<BudgetSwap> swaps = null;
         var cts = new CancellationTokenSource();
         dlg.FormClosed += (s, e) => cts.Cancel();
 
-        find.Click += async (s, e) =>
+        dlg.Shown += async (s, e) =>
         {
-            find.Enabled = apply.Enabled = false;
-            list.Items.Clear();
-            _data.BudgetLimit = (double)max.Value;
-            Save();
             try
             {
-                swaps = await BudgetAdvisor.SuggestAsync(game, lib, format, rules, Source(game), (double)max.Value,
+                var suggestions = await UpgradeAdvisor.SuggestAsync(game, lib, format, rules, Source(game),
                     name => { if (!dlg.IsDisposed) dlg.BeginInvoke(() => info.Text = $"Checking {name}..."); }, cts.Token);
                 if (dlg.IsDisposed) return;
                 list.BeginUpdate();
-                foreach (var swap in swaps.OrderByDescending(x => x.BestSaving))
+                foreach (var sug in suggestions)
                 {
-                    if (swap.Options.Count == 0)
-                    {
-                        var none = list.Items.Add($"{swap.Copies}x {swap.Current.Name}");
-                        none.SubItems.Add(Money.Format(swap.Current.PriceUsd));
-                        none.SubItems.Add("No cheaper option found");
-                        none.SubItems.Add("");
-                        none.SubItems.Add("");
-                        none.ForeColor = Color.DimGray;
-                        continue;
-                    }
+                    var group = new ListViewGroup($"{sug.Copies}x {sug.Current.Name}   (rating {(int)Math.Round(sug.Current.Quality * 100)}" +
+                                                  (sug.Current.PriceUsd > 0 ? $", {Money.Format(sug.Current.PriceUsd)}" : "") + ")");
+                    list.Groups.Add(group);
                     bool first = true;
-                    foreach (var o in swap.Options)
+                    foreach (var o in sug.Options)
                     {
-                        var item = list.Items.Add(first ? $"{swap.Copies}x {swap.Current.Name}" : "");
-                        item.SubItems.Add(first ? Money.Format(swap.Current.PriceUsd) : "");
-                        item.SubItems.Add(o.Card.Name + (o.Card.SetName != "" ? $" ({o.Card.SetName})" : ""));
+                        var item = new ListViewItem(first ? sug.Current.Name : "", group);
+                        item.SubItems.Add(o.Label);
                         item.SubItems.Add(o.Price > 0 ? Money.Format(o.Price) : "unknown");
-                        item.SubItems.Add($"{o.Kind}: {o.Why}");
-                        item.Tag = (swap, o);
-                        item.ToolTipText = o.Why;
+                        item.SubItems.Add(o.Why);
+                        item.Tag = (sug, o);
+                        item.ToolTipText = o.Card.TypeLine;
+                        list.Items.Add(item);
                         first = false;
                     }
                 }
                 list.EndUpdate();
-                int count = swaps.Count(x => x.Options.Count > 0);
-                info.Text = swaps.Count == 0 ? $"Every card in the deck is {Money.Format((double)max.Value)} or less, or has no price yet."
-                          : $"{count} of {swaps.Count} cards over {Money.Format((double)max.Value)} have cheaper options. Check one option per card.";
-                apply.Enabled = count > 0;
+                int count = suggestions.Sum(x => x.Options.Count);
+                info.Text = count == 0
+                    ? "No stronger cards found for this deck's weakest cards. It may already use the best options in its colors."
+                    : $"{count} recommended upgrades for {suggestions.Count} of your weakest cards, strongest first. Prices are per card.";
+                save.Enabled = count > 0;
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { if (!dlg.IsDisposed) info.Text = ex is RateLimitedException ? ex.Message : "Couldn't finish: " + ex.Message; }
-            finally { if (!dlg.IsDisposed) find.Enabled = true; }
         };
 
-        apply.Click += (s, e) =>
+        save.Click += (s, e) =>
         {
-            var picks = list.CheckedItems.Cast<ListViewItem>().Select(i => i.Tag).OfType<(BudgetSwap swap, SwapOption option)>().ToList();
-            if (picks.Count == 0) { info.Text = "Check the swaps you want first."; return; }
-            _undo = new LibrarySnapshot(lib);
-            double before = lib.Deck.Sum(x => x.InDeck * x.Card.PriceUsd);
-            var lines = new List<string>();
-            foreach (var (swap, option) in picks)
-            {
-                BudgetAdvisor.ApplySwap(lib, swap, option);
-                lines.Add($"  {swap.Copies}x {swap.Current.Name}  ->  {option.Card.Name}" + (option.Price > 0 ? $" ({Money.Format(option.Price)})" : ""));
-            }
-            double after = lib.Deck.Sum(x => x.InDeck * x.Card.PriceUsd);
+            var picks = list.CheckedItems.Cast<ListViewItem>().Select(i => i.Tag).OfType<(UpgradeSuggestion sug, UpgradeOption option)>().ToList();
+            if (picks.Count == 0) { info.Text = "Check the upgrades you want on your wishlist first."; return; }
+            foreach (var (sug, option) in picks) UpgradeAdvisor.AddToWishlist(lib, sug, option);
+            _undo = null;
             Save();
             RefreshAll();
-            var report = rules.Analyze(lib, format);
-            _reportBox.Text = Crlf($"Budget swaps applied\n{string.Join("\n", lines)}\n\nDeck value {Money.Format(before)} -> {Money.Format(after)}\n" +
-                                   "Cards you don't own were added as loaners (Collection tab, Loaners only).\n\n" + report);
-            SetStatus("Budget swaps applied. Press Undo optimize to go back.");
-            dlg.Close();
+            info.Text = $"Added {picks.Count} card{(picks.Count == 1 ? "" : "s")} to your wishlist (Collection tab, Loaners only).";
+            foreach (ListViewItem i in list.CheckedItems.Cast<ListViewItem>().ToList()) i.Checked = false;
+            SetStatus("Upgrades added to your wishlist. Press Loaner picks to see the deck with them.");
         };
 
-        dlg.Shown += (s, e) => find.PerformClick();
         dlg.ShowDialog(this);
         await Task.CompletedTask;
     }

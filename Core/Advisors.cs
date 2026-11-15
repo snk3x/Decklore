@@ -2,14 +2,17 @@ using System.Text.RegularExpressions;
 
 namespace TcgScanner;
 
-/// <summary>One cheaper option for a deck card.</summary>
-public record SwapOption(Card Card, string Kind, double Price, string Why);
+/// <summary>A stronger card that could take a weak deck card's place.</summary>
+public record UpgradeOption(Card Card, double Price, string Why)
+{
+    /// <summary>Gundam and Cyberpunk have several different cards with the same name, so show the card number there.</summary>
+    public string Label => Card.Game == Game.Magic || string.IsNullOrEmpty(Card.Number) ? Card.Name : $"{Card.Name} ({Card.Number})";
+}
 
-/// <summary>A deck card above the budget, with cheaper options for it.</summary>
-public record BudgetSwap(LibraryEntry Entry, int Copies, List<SwapOption> Options)
+/// <summary>One of the deck's weakest cards, with stronger cards that do a similar job (best first).</summary>
+public record UpgradeSuggestion(LibraryEntry Entry, int Copies, List<UpgradeOption> Options)
 {
     public Card Current => Entry.Card;
-    public double BestSaving => Options.Count == 0 ? 0 : (Current.PriceUsd - Options.Min(o => o.Price)) * Copies;
 }
 
 /// <summary>A loaner card that would improve the deck, and the owned cards it would push out.</summary>
@@ -27,69 +30,54 @@ public class LoanerReport
 }
 
 /// <summary>
-/// Budget swaps: for deck cards above a price limit, suggest a cheaper printing of the same card (plays exactly the same),
-/// and for Magic, Gundam and Cyberpunk, cheaper cards that do a similar job.
+/// Upgrades: finds the weakest cards in the deck and lists stronger, more played cards that do a similar job,
+/// ranked best first with their prices. It only recommends; nothing in the deck changes. Picks can be saved
+/// to the collection as wishlist loaners, which Loaner picks can then test in the deck.
 /// </summary>
-public static class BudgetAdvisor
+public static class UpgradeAdvisor
 {
-    public static async Task<List<BudgetSwap>> SuggestAsync(Game game, Library lib, string format, DeckRules rules,
-        ICardSource source, double maxPrice, Action<string> progress = null, CancellationToken ct = default)
-    {
-        // Cyberpunk Legends set the deck's RAM and colors, so they are never swapped.
-        var expensive = lib.Deck.Where(e => e.Card.PriceUsd > maxPrice && e.Card.Category is not ("Resource" or "Token" or "Legend"))
-                                .OrderByDescending(e => e.Card.PriceUsd)
-                                // Gundam prices cost one JustTCG request per card number (free plan: 100 a day), so check fewer cards there.
-                                .Take(game == Game.Gundam ? 8 : 12).ToList();
-        var deckColors = lib.Deck.SelectMany(e => e.Card.Colors).Distinct().ToHashSet();
-        var result = new List<BudgetSwap>();
+    /// <summary>Pokémon and Yu-Gi-Oh! card effects are too specific to match "a similar job" safely.</summary>
+    public static bool Supports(Game game) => game is Game.Magic or Game.Gundam or Game.Cyberpunk;
 
-        foreach (var e in expensive)
+    public static async Task<List<UpgradeSuggestion>> SuggestAsync(Game game, Library lib, string format, DeckRules rules,
+        ICardSource source, Action<string> progress = null, CancellationToken ct = default)
+    {
+        var result = new List<UpgradeSuggestion>();
+        if (!Supports(game)) return result;
+
+        // Basic lands, Resources, tokens and Cyberpunk Legends (they set the deck's RAM and colors) are never upgraded here.
+        var weakest = lib.Deck.Where(e => e.Card.Category is not ("Resource" or "Token" or "Legend") && !e.Card.UnlimitedCopies &&
+                                          !e.Card.TypeLine.Contains("Basic"))
+                              .OrderBy(e => e.Card.Quality)
+                              // Gundam prices cost one JustTCG request per card number (free plan: 100 a day), so check fewer cards there.
+                              .Take(game == Game.Gundam ? 6 : 8).ToList();
+        var deckColors = lib.Deck.SelectMany(e => e.Card.Colors).Distinct().ToHashSet();
+        var inDeck = lib.Deck.Select(e => game == Game.Magic ? e.Card.Name : e.Card.Number).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var e in weakest)
         {
             ct.ThrowIfCancellationRequested();
             progress?.Invoke(e.Card.Name);
-            var options = new List<SwapOption>();
-
-            // 1. The same card, cheaper printing: identical in play, so always the safest swap.
+            List<UpgradeOption> options;
             try
             {
-                var prints = await source.PrintingsAsync(e.Card, ct);
-                if (game == Game.Pokemon)
+                options = game switch
                 {
-                    // Pokémon printings come without prices; look up the newest few.
-                    var priced = new List<Card>();
-                    foreach (var p in prints.Where(p => p.Id != e.Card.Id).Take(8))
-                        if (await source.RefreshAsync(p, ct) is { } full) priced.Add(full);
-                    prints = priced;
-                }
-                var cheaper = prints.Where(p => p.PriceUsd > 0 && p.PriceUsd < e.Card.PriceUsd && p.PriceUsd <= maxPrice &&
-                                                rules.LegalityLabel(p, format) is not ("Not legal" or "Banned" or "Forbidden"))
-                                    .OrderBy(p => p.PriceUsd).FirstOrDefault();
-                if (cheaper != null)
-                    options.Add(new SwapOption(cheaper, "Cheaper printing", cheaper.PriceUsd,
-                        $"Same card, {cheaper.SetName} {cheaper.Number}".Trim()));
-            }
-            catch (RateLimitedException) { throw; }
-            catch { /* printings are a bonus; keep going */ }
-
-            // 2. A different card that does a similar job.
-            try
-            {
-                var similar = game switch
-                {
-                    Game.Magic => await MagicAlternativesAsync((ScryfallSource)source, e.Card, format, maxPrice, ct),
-                    Game.Gundam => await CatalogueAlternativesAsync(await GundamSource.CatalogueAsync(false, ct), e.Card, deckColors, maxPrice, ct),
-                    Game.Cyberpunk => await CatalogueAlternativesAsync(await CyberpunkSource.CatalogueAsync(ct), e.Card, deckColors, maxPrice, ct),
-                    _ => new List<SwapOption>(), // Pokémon and Yu-Gi-Oh: card effects are too specific to swap safely
+                    Game.Magic => await MagicUpgradesAsync((ScryfallSource)source, e.Card, format, deckColors, inDeck, ct),
+                    Game.Gundam => await CatalogueUpgradesAsync(await GundamSource.CatalogueAsync(false, ct), e.Card, deckColors, inDeck, ct),
+                    _ => await CatalogueUpgradesAsync(await CyberpunkSource.CatalogueAsync(ct), e.Card, deckColors, inDeck, ct),
                 };
-                options.AddRange(similar.Where(s => rules.LegalityLabel(s.Card, format) is not ("Not legal" or "Banned" or "Forbidden")));
             }
             catch (RateLimitedException) { throw; }
-            catch { }
-
-            if (options.Count > 0) result.Add(new BudgetSwap(e, e.InDeck, options.Take(4).ToList()));
+            catch (OperationCanceledException) { throw; }
+            catch { continue; }
+            options = options.Where(o => rules.LegalityLabel(o.Card, format) is not ("Not legal" or "Banned" or "Forbidden")).Take(3).ToList();
+            if (options.Count > 0) result.Add(new UpgradeSuggestion(e, e.InDeck, options));
         }
         return result;
     }
+
+    static int Rating(Card c) => (int)Math.Round(c.Quality * 100);
 
     // What a Magic card does, as a Scryfall search term, from common rules-text phrases.
     static readonly (string pattern, string query, string role)[] MagicRoles =
@@ -105,94 +93,107 @@ public static class BudgetAdvisor
         (@"return target .* to its owner's hand", "o:\"to its owner's hand\"", "bounce"),
         (@"create .* token", "o:create o:token", "makes tokens"),
         (@"discards?", "o:discard", "discard"),
+        (@"deals? (\S+|x) damage", "o:deals o:damage", "damage"), // burn aimed at players too (Lava Spike, Searing Blaze)
     };
 
-    static async Task<List<SwapOption>> MagicAlternativesAsync(ScryfallSource scryfall, Card card, string format, double maxPrice, CancellationToken ct)
+    // Creatures with no clear role: keep what makes them good in combat (a hasty attacker should stay hasty).
+    static readonly string[] MagicKeywords = { "Haste", "Prowess", "Flying", "First strike", "Double strike", "Trample", "Lifelink",
+                                               "Deathtouch", "Menace", "Flash", "Vigilance" };
+
+    /// <summary>Magic: Scryfall sorted by EDHREC rank, so the most played (usually strongest) cards come first.</summary>
+    static async Task<List<UpgradeOption>> MagicUpgradesAsync(ScryfallSource scryfall, Card card, string format, HashSet<string> deckColors,
+                                                              HashSet<string> inDeck, CancellationToken ct)
     {
         string fmt = format.ToLowerInvariant();
-        string price = maxPrice.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-        string colors = card.Colors.Count == 0 ? "c" : string.Join("", card.Colors);
+        var colorSet = deckColors.Where(c => "WUBRG".Contains(c)).ToList();
+        string colors = colorSet.Count == 0 ? "c" : string.Join("", colorSet);
         // Two-faced cards: the front face decides what the card is (Fable is an enchantment, not its creature back side).
         string frontType = card.TypeLine.Split(" // ")[0];
         string type = new[] { "Land", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment" }
             .FirstOrDefault(t => frontType.Contains(t)) ?? card.Category;
 
+        string query, why;
         if (type == "Land")
         {
-            // Lands are about the mana they make: a red/white dual should be replaced by another red/white land.
+            // Lands are about the mana they make: a red/white land should be upgraded to a better red/white land.
             var makes = card.ProducedMana.Where(m => "WUBRG".Contains(m)).ToList();
-            if (makes.Count == 0) return new List<SwapOption>();
-            var lands = await scryfall.SearchAsync(
-                $"f:{fmt} t:land -t:basic id<={colors} produces={string.Join("", makes).ToLowerInvariant()} usd<={price} usd>0 -!\"{card.Name}\"", 3, ct);
-            string colorsText = string.Join("/", makes.Select(m => m switch { "W" => "white", "U" => "blue", "B" => "black", "R" => "red", _ => "green" }));
-            return lands.Select(c => new SwapOption(c, "Similar card", c.PriceUsd, $"Also makes {colorsText} mana")).ToList();
+            if (makes.Count == 0) return new List<UpgradeOption>();
+            query = $"f:{fmt} t:land -t:basic id<={colors} produces={string.Join("", makes).ToLowerInvariant()}";
+            why = "Makes the same colors";
         }
-
-        string text = card.Text.ToLowerInvariant().Split("//")[0];
-        var role = MagicRoles.FirstOrDefault(r => Regex.IsMatch(text, r.pattern));
-        var q = $"f:{fmt} id<={colors} t:{type.ToLowerInvariant()} usd<={price} usd>0 -!\"{card.Name}\" mv<={card.ManaValue + 1:0}";
-        if (role.query != null) q += " " + role.query;
-        var found = await scryfall.SearchAsync(q, 3, ct);
-        string why = role.role != null ? $"Also {role.role}, {type.ToLowerInvariant()}" : $"Similar {type.ToLowerInvariant()}";
-        return found.Select(c => new SwapOption(c, "Similar card", c.PriceUsd, $"{why}, mana value {c.ManaValue:0}")).ToList();
+        else
+        {
+            string text = card.Text.ToLowerInvariant().Split("//")[0];
+            var role = MagicRoles.FirstOrDefault(r => Regex.IsMatch(text, r.pattern));
+            query = $"f:{fmt} id<={colors} t:{type.ToLowerInvariant()} mv<={card.ManaValue + 1:0}";
+            // Stay in the card's own colors, so a red card is upgraded to a red card, not a colorless artifact.
+            var own = card.Colors.Where(c => "WUBRG".Contains(c)).ToList();
+            if (own.Count > 0) query += $" c>={string.Join("", own).ToLowerInvariant()}";
+            if (role.query != null) query += " " + role.query;
+            why = role.role != null ? $"Also {role.role}" : $"Stronger {type.ToLowerInvariant()}";
+            if (role.query == null && type == "Creature")
+            {
+                var kw = MagicKeywords.FirstOrDefault(k => Regex.IsMatch(text, $@"\b{k.ToLowerInvariant()}\b"));
+                if (kw != null)
+                {
+                    query += $" keyword:\"{kw.ToLowerInvariant()}\"";
+                    why = $"Also has {kw.ToLowerInvariant()}";
+                }
+            }
+        }
+        var found = await scryfall.SearchAsync(query, 12, ct);
+        return found.Where(c => !inDeck.Contains(c.Name) && c.Quality > card.Quality + 0.05)
+                    .OrderByDescending(c => c.Quality)
+                    .Select(c => new UpgradeOption(c, c.PriceUsd,
+                        $"{why}, mana value {c.ManaValue:0}, rating {Rating(c)} vs {Rating(card)}"))
+                    .ToList();
     }
 
     static readonly string[] Keywords = { "Blocker", "Repair", "Breach", "First Strike", "High-Maneuver", "Support", "Suppression",
-                                          "Burst", "Deploy", "Go Solo", "Blocker", "Quick", "Call" };
+                                          "Burst", "Deploy", "Go Solo", "Quick", "Call" };
 
-    /// <summary>Gundam and Cyberpunk: pick close matches from the full card list (same type and color, similar cost and stats).</summary>
-    static async Task<List<SwapOption>> CatalogueAlternativesAsync(List<Card> catalogue, Card card, HashSet<string> deckColors,
-                                                                    double maxPrice, CancellationToken ct)
+    /// <summary>Gundam and Cyberpunk: the strongest cards of the same type and colors at about the same cost.</summary>
+    static async Task<List<UpgradeOption>> CatalogueUpgradesAsync(List<Card> catalogue, Card card, HashSet<string> deckColors,
+                                                                  HashSet<string> inDeck, CancellationToken ct)
     {
         var traits = card.Race.Split(", ", StringSplitOptions.RemoveEmptyEntries).ToHashSet();
         var cardKeywords = Keywords.Where(k => card.Text.Contains(k, StringComparison.OrdinalIgnoreCase)).ToHashSet();
         var candidates = catalogue
-            .Where(c => c.Category == card.Category && c.Number != card.Number && !c.Id.Contains("_p") &&
+            .Where(c => c.Category == card.Category && !inDeck.Contains(c.Number) && !c.Id.Contains("_p") &&
                         c.Colors.All(col => deckColors.Count == 0 || deckColors.Contains(col)) &&
-                        Math.Abs(c.Level - card.Level) <= 1 && Math.Abs(c.ManaValue - card.ManaValue) <= 1 &&
+                        c.Level <= card.Level + 1 && c.ManaValue <= card.ManaValue + 1 &&
+                        c.Quality > card.Quality + 0.05 &&
                         (card.Game != Game.Cyberpunk || c.Ram <= card.Ram)) // keep the deck within its RAM
-            .Select(c => (card: c, score:
-                1 - Math.Min(1, Math.Abs(c.Power - card.Power) / 6.0) * 0.5
-                  - Math.Min(1, Math.Abs(c.Hp - card.Hp) / 6.0) * 0.5
-                  + 0.25 * c.Race.Split(", ", StringSplitOptions.RemoveEmptyEntries).Count(traits.Contains)
-                  + 0.2 * Keywords.Count(k => cardKeywords.Contains(k) && c.Text.Contains(k, StringComparison.OrdinalIgnoreCase))
-                  + 0.3 * c.Quality))
+            // Strength first, with a nudge toward cards that share traits or keywords with the one they'd replace.
+            .Select(c => (card: c, score: c.Quality
+                  + 0.05 * c.Race.Split(", ", StringSplitOptions.RemoveEmptyEntries).Count(traits.Contains)
+                  + 0.05 * Keywords.Count(k => cardKeywords.Contains(k) && c.Text.Contains(k, StringComparison.OrdinalIgnoreCase))))
             .OrderByDescending(x => x.score)
+            .GroupBy(x => x.card.Number).Select(g => g.First()) // one printing per card number
             .Take(3)
             .Select(x => JsonClone(x.card))
             .ToList();
 
-        // Prices for these games come from JustTCG (needs the user's key); price only the closest few.
+        // Prices for these games come from JustTCG (needs the user's key).
         foreach (var c in candidates) await JustTcg.ApplyAsync(c, ct);
-        // Prefer options with a known price under the limit; show unknown prices only when nothing priced fits.
-        var priced = candidates.Where(c => c.PriceUsd > 0 && c.PriceUsd <= maxPrice && c.PriceUsd < card.PriceUsd).ToList();
-        return (priced.Count > 0 ? priced : candidates.Where(c => c.PriceUsd <= 0).ToList())
-            .Take(3)
-            .Select(c => new SwapOption(c, "Similar card", c.PriceUsd,
-                $"Same type and color, cost {c.ManaValue:0}" + (c.PriceUsd <= 0 ? " (price unknown)" : "")))
-            .ToList();
+        return candidates.Select(c => new UpgradeOption(c, c.PriceUsd,
+            $"Same type and colors, cost {c.ManaValue:0}, rating {Rating(c)} vs {Rating(card)}" +
+            (c.PriceUsd <= 0 ? " (price unknown)" : ""))).ToList();
     }
 
     static Card JsonClone(Card c) => System.Text.Json.JsonSerializer.Deserialize<Card>(System.Text.Json.JsonSerializer.Serialize(c));
 
     /// <summary>
-    /// Puts a budget option into the deck in place of the current card. A card you don't own is added as a loaner,
-    /// so the loaner list doubles as a shopping list.
+    /// Saves an upgrade to the collection as a wishlist loaner (enough copies to replace the weak card). The deck is not changed;
+    /// Loaner picks shows how the deck would look with it.
     /// </summary>
-    public static LibraryEntry ApplySwap(Library lib, BudgetSwap swap, SwapOption option)
+    public static LibraryEntry AddToWishlist(Library lib, UpgradeSuggestion suggestion, UpgradeOption option)
     {
-        int copies = Math.Min(swap.Copies, swap.Entry.InDeck);
-        swap.Entry.InDeck -= copies;
         var target = lib.Add(option.Card, 0, 0);
-        target.InDeck += copies;
-        // Copies in the deck that you don't own are loaners (to borrow or buy).
-        int needed = Math.Max(0, target.InDeck - target.Owned);
-        if (target.Loaned < needed)
-        {
-            target.Loaned = needed;
-            if (string.IsNullOrEmpty(target.LoanNote))
-                target.LoanNote = option.Price > 0 ? $"Budget swap for {swap.Current.Name}, about {Money.Format(option.Price)}" : $"Budget swap for {swap.Current.Name}";
-        }
+        int copies = Math.Max(1, suggestion.Copies);
+        if (target.Loaned < copies) target.Loaned = copies;
+        if (string.IsNullOrEmpty(target.LoanNote))
+            target.LoanNote = $"Wishlist: upgrade for {suggestion.Current.Name}" + (option.Price > 0 ? $", about {Money.Format(option.Price)}" : "");
         return target;
     }
 }
