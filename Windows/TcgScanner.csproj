@@ -10,7 +10,7 @@
     <RootNamespace>TcgScanner</RootNamespace>
     <Product>TCG deck scanner</Product>
     <AssemblyTitle>TCG deck scanner</AssemblyTitle>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <ApplicationIcon>Card icon.ico</ApplicationIcon>
   </PropertyGroup>
 

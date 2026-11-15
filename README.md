@@ -1,13 +1,13 @@
 # TCG deck scanner
 
-A Windows app that scans trading cards with a webcam, keeps track of your collection and its value, and builds or fixes a deck for Magic: The Gathering, Pokémon TCG, Yu-Gi-Oh!, the Cyberpunk TCG, or the Gundam Card Game.
+A Windows and Android app that scans trading cards hands-free with a camera, keeps track of your collection and its value, and builds or fixes a deck for Magic: The Gathering, Pokémon TCG, Yu-Gi-Oh!, the Cyberpunk TCG, or the Gundam Card Game.
 
 ## Download (easiest)
 
-1. Go to the [latest release](https://github.com/snk3x/TCGDeckScanner/releases/latest) and download the zip.
-2. Unzip it and double-click **TCG deck scanner.exe**. Nothing else to install; it includes everything it needs.
+Go to the [latest release](https://github.com/snk3x/TCGDeckScanner/releases/latest):
 
-Windows may show "Windows protected your PC" because the app isn't signed with a paid certificate. Click **More info**, then **Run anyway**.
+- **Windows:** download the zip, unzip it, and double-click **TCG deck scanner.exe**. Nothing else to install. Windows may show "Windows protected your PC" because the app isn't signed with a paid certificate; click **More info**, then **Run anyway**.
+- **Android (6.0 or newer):** download the `.apk` on your phone and open it. Android asks to allow installing apps from your browser or Files app the first time; allow it, then tap **Install**.
 
 ## Install from source
 
@@ -23,9 +23,11 @@ To update it after the code changes, double-click **Install or update.cmd** in t
 
 Needs Windows 10 or 11, the .NET 10 runtime, an internet connection, and English in Windows language settings (for text recognition).
 
-## Android version (in progress)
+## Android app
 
-An Android app with the same features lives in the `Android` folder: take or choose a card photo (text is read on the phone with Google ML Kit), Collection, Deck, Learn and Settings tabs. It isn't released yet. To build it you need the .NET 10 SDK with the `maui-android` workload:
+The Android app has the same features as the Windows app, in five tabs: Scan, Collection, Deck, Learn and Settings. Open the Scan tab and point the camera at a card: it reads the card on the phone with Google ML Kit (no internet needed for that part), beeps and vibrates, and adds it. Then show the next card. You can also take or choose a photo, or type a name.
+
+To build it yourself you need the .NET 10 SDK with the `maui-android` workload:
 
 ```
 dotnet workload install maui-android
@@ -42,7 +44,7 @@ dotnet build Android\TcgMobile.csproj -c Release
 
 ## Use it
 
-1. **Scan cards.** Click Start camera, hold one card flat inside the green frame with the name above the dashed line, and press F5. You can also load a photo or type a name. The game is detected automatically.
+1. **Scan cards.** Click Start camera and hold one card flat inside the green frame. With **Auto scan** on (the default), the card is added on its own: the frame turns gold while checking, then flashes green with a sound. Show the next card. To add another copy of the same card, take it away for a second and show it again. You can also press F5, load a photo, or type a name. The game is detected automatically.
 2. **Collection.** Every scanned card lands here. Edit Owned or In deck directly in the yellow columns.
 3. **Deck.** Pick the format at the top, then:
    - **Analyze** checks the deck against the format's rules and gives a health score.

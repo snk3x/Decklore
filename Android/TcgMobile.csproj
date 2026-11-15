@@ -13,11 +13,21 @@
 
 		<ApplicationTitle>TCG deck scanner</ApplicationTitle>
 		<ApplicationId>com.snk3x.tcgdeckscanner</ApplicationId>
-		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-		<ApplicationVersion>1</ApplicationVersion>
+		<ApplicationDisplayVersion>1.1</ApplicationDisplayVersion>
+		<ApplicationVersion>2</ApplicationVersion>
 
 		<SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
 		<AndroidPackageFormat>apk</AndroidPackageFormat>
+	</PropertyGroup>
+
+	<!-- Release builds are signed with the owner's permanent key when it's on this computer (it is never in the repository).
+	     The password comes from the TCG_KEYSTORE_PASS environment variable, set only for the build. -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release' And '$(TCG_KEYSTORE_PASS)' != '' And Exists('$(USERPROFILE)\TCG deck scanner signing\tcgdeckscanner.keystore')">
+		<AndroidKeyStore>true</AndroidKeyStore>
+		<AndroidSigningKeyStore>$(USERPROFILE)\TCG deck scanner signing\tcgdeckscanner.keystore</AndroidSigningKeyStore>
+		<AndroidSigningKeyAlias>tcgdeckscanner</AndroidSigningKeyAlias>
+		<AndroidSigningStorePass>env:TCG_KEYSTORE_PASS</AndroidSigningStorePass>
+		<AndroidSigningKeyPass>env:TCG_KEYSTORE_PASS</AndroidSigningKeyPass>
 	</PropertyGroup>
 
 	<!-- Use the Android SDK and Java installed in the user profile, when present. -->
