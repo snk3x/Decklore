@@ -259,6 +259,7 @@ public class ScanPage : ContentPage
 	{
 		if (c.Game != AppState.Game) AppState.Game = c.Game;
 		var e = AppState.Lib.Add(c, 1, _addToDeck ? 1 : 0);
+		AppState.Undo = null; // a deck Undo after this would also remove the card just scanned
 		_last = e;
 		_lastToDeck = _addToDeck;
 		_sessionCount++;
@@ -334,6 +335,7 @@ public static class Printing
 			var full = await source.RefreshAsync(prints[index]) ?? prints[index];
 			var lib = AppState.Data.Get(entry.Card.Game);
 			var moved = CollectionActions.ChangePrinting(lib, entry, full);
+			AppState.Undo = null;
 			AppState.NotifyChanged();
 			return moved;
 		}

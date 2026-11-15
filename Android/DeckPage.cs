@@ -111,11 +111,12 @@ public class DeckPage : ContentPage
 
 	Task UndoAsync()
 	{
-		if (AppState.Undo == null) { _report.Text = "Nothing to undo."; return Task.CompletedTask; }
-		foreach (var e in AppState.Lib.Entries.Values) e.InDeck = AppState.Undo.GetValueOrDefault(e);
+		if (AppState.Undo == null || !AppState.Undo.IsFor(AppState.Lib)) { _report.Text = "Nothing to undo."; return Task.CompletedTask; }
+		int removed = AppState.Undo.Restore();
 		AppState.Undo = null;
 		AppState.NotifyChanged();
 		Analyze();
+		if (removed > 0) _report.Text = $"Undone. Removed {removed} card{(removed == 1 ? "" : "s")} the last action had added to your collection.\n\n" + _report.Text;
 		return Task.CompletedTask;
 	}
 

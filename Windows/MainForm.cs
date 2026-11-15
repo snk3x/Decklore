@@ -33,7 +33,7 @@ public class MainForm : Form
 
     LibraryEntry _lastAdded;
     bool _lastAddedToDeck;
-    Dictionary<LibraryEntry, int> _undo;
+    LibrarySnapshot _undo; // the collection before the last deck action, so Undo can put it back exactly
     int _frameBusy;
     bool _busy, _refreshing;
 
@@ -462,6 +462,7 @@ public class MainForm : Form
         if (grid.Rows[e.RowIndex].Tag is not LibraryEntry entry) return;
         string col = grid.Columns[e.ColumnIndex].Name;
         if (!int.TryParse(Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value), out int v) || v < 0) v = 0;
+        _undo = null; // edited by hand, so an older deck Undo no longer applies
         if (col == "Owned") entry.Owned = v;
         else if (col == "InDeck") entry.InDeck = v;
         else return;
@@ -670,6 +671,7 @@ public class MainForm : Form
         if (c.Game != CurrentGame) _gameBox.SelectedIndex = (int)c.Game;
         bool toDeck = _addToDeck.Checked;
         var e = Lib.Add(c, 1, toDeck ? 1 : 0);
+        _undo = null; // a deck Undo after this would also remove the card just scanned
         _lastAdded = e;
         _lastAddedToDeck = toDeck;
         _sessionCount++;
@@ -749,6 +751,7 @@ public class MainForm : Form
     {
         foreach (DataGridViewRow row in grid.SelectedRows)
             if (row.Tag is LibraryEntry e) e.InDeck = Math.Max(0, e.InDeck + delta);
+        _undo = null;
         Save();
         RefreshAll();
     }
@@ -761,6 +764,7 @@ public class MainForm : Form
         if (MessageBox.Show(this, $"Delete {what} from your collection? This cannot be undone.", "Delete cards",
                             MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         foreach (var e in entries) Lib.Remove(e);
+        _undo = null;
         Save();
         RefreshAll();
     }
@@ -830,7 +834,7 @@ public class MainForm : Form
         SetBusy(true, $"Building {deck.Code} {deck.Name}...");
         try
         {
-            _undo = Lib.Entries.Values.ToDictionary(e => e, e => e.InDeck);
+            _undo = new LibrarySnapshot(Lib);
             string summary = await CollectionActions.BuildStarterAsync(Lib, deck, addToCollection, replaceDeck);
             Save();
             RefreshAll();
@@ -940,6 +944,7 @@ public class MainForm : Form
             double oldPrice = entry.Card.PriceUsd;
             bool wasLast = entry == _lastAdded;
             var moved = CollectionActions.ChangePrinting(Lib, entry, full);
+            _undo = null; // the collection changed, so an older deck Undo no longer applies
             if (wasLast)
             {
                 _lastAdded = moved;
@@ -1072,7 +1077,7 @@ public class MainForm : Form
         SetBusy(true, "Optimizing the deck...");
         try
         {
-            _undo = Lib.Entries.Values.ToDictionary(e => e, e => e.InDeck);
+            _undo = new LibrarySnapshot(Lib);
             var log = await Rules.OptimizeAsync(Lib, Format, CancellationToken.None);
             Save();
             RefreshAll();
@@ -1086,13 +1091,13 @@ public class MainForm : Form
 
     void UndoOptimize()
     {
-        if (_undo == null) { SetStatus("Nothing to undo."); return; }
-        foreach (var e in Lib.Entries.Values) e.InDeck = _undo.GetValueOrDefault(e);
+        if (_undo == null || !_undo.IsFor(Lib)) { SetStatus("Nothing to undo."); return; }
+        int removed = _undo.Restore();
         _undo = null;
         Save();
         RefreshAll();
         Analyze();
-        SetStatus("Restored the previous deck.");
+        SetStatus(removed > 0 ? $"Restored the previous deck and removed {removed} card(s) the last action had added to your collection." : "Restored the previous deck.");
     }
 
     void ClearDeck()
@@ -1100,7 +1105,7 @@ public class MainForm : Form
         if (Lib.DeckCount == 0) return;
         if (MessageBox.Show(this, "Take every card out of the deck? Your collection stays as it is.", "Clear deck",
                             MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-        _undo = Lib.Entries.Values.ToDictionary(e => e, e => e.InDeck);
+        _undo = new LibrarySnapshot(Lib);
         foreach (var e in Lib.Entries.Values) e.InDeck = 0;
         Save();
         RefreshAll();
@@ -1123,7 +1128,7 @@ public class MainForm : Form
         SetBusy(true, "Importing...");
         try
         {
-            _undo = Lib.Entries.Values.ToDictionary(e => e, e => e.InDeck);
+            _undo = new LibrarySnapshot(Lib);
             if (choice == DialogResult.Yes) foreach (var e in Lib.Entries.Values) e.InDeck = 0;
             var missing = new List<string>();
             int i = 0;

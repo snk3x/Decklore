@@ -75,6 +75,38 @@ public static class DeckList
     }
 }
 
+/// <summary>
+/// A copy of a collection's counts taken before a deck action (Optimize, Starter deck, Import, Clear).
+/// Restoring it puts back both "owned" and "in deck" counts and removes any cards the action added,
+/// so a starter deck added by mistake disappears from the collection too.
+/// </summary>
+public sealed class LibrarySnapshot
+{
+    readonly Library _library;
+    readonly Dictionary<LibraryEntry, (int owned, int inDeck)> _counts;
+
+    public LibrarySnapshot(Library library)
+    {
+        _library = library;
+        _counts = library.Entries.Values.ToDictionary(e => e, e => (e.Owned, e.InDeck));
+    }
+
+    /// <summary>True when this snapshot belongs to that collection (each game has its own).</summary>
+    public bool IsFor(Library library) => ReferenceEquals(_library, library);
+
+    /// <summary>Puts the collection back exactly as it was. Returns how many added cards were removed.</summary>
+    public int Restore()
+    {
+        int removed = 0;
+        foreach (var e in _library.Entries.Values.ToList())
+        {
+            if (_counts.TryGetValue(e, out var c)) { e.Owned = c.owned; e.InDeck = c.inDeck; }
+            else { _library.Remove(e); removed++; }
+        }
+        return removed;
+    }
+}
+
 public static class CollectionActions
 {
     /// <summary>Swaps a collection entry to another printing, keeping its counts. Returns the entry now holding them.</summary>

@@ -109,6 +109,7 @@ public class CollectionPage : ContentPage
 				break;
 			default: return;
 		}
+		AppState.Undo = null; // the collection was edited by hand, so an older deck Undo no longer applies
 		AppState.NotifyChanged();
 	}
 

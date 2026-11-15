@@ -30,8 +30,11 @@ public static class AppState
 	/// <summary>Raised whenever the collection, deck, game or format changes, so every tab can refresh.</summary>
 	public static event Action Changed;
 
-	/// <summary>The deck before the last Optimize, Starter deck, Import or Clear, so it can be put back.</summary>
-	public static Dictionary<LibraryEntry, int> Undo;
+	/// <summary>
+	/// The collection before the last Optimize, Starter deck, Import or Clear, so it can be put back exactly
+	/// (deck counts, owned counts, and any cards the action added). Cleared when cards are scanned or edited afterwards.
+	/// </summary>
+	public static LibrarySnapshot Undo;
 
 	public static void Init() => Data = Storage.Load();
 
@@ -61,7 +64,7 @@ public static class AppState
 		}
 	}
 
-	public static void SnapshotDeck() => Undo = Lib.Entries.Values.ToDictionary(e => e, e => e.InDeck);
+	public static void SnapshotDeck() => Undo = new LibrarySnapshot(Lib);
 
 	public static void Save()
 	{
