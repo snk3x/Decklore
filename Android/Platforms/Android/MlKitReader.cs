@@ -29,14 +29,18 @@ public static class MlKitReader
 	public static async System.Threading.Tasks.Task<ScanResult> ReadFrameAsync(Android.Media.Image frame, int rotationDegrees)
 	{
 		var lines = await RecognizeAsync(InputImage.FromMediaImage(frame, rotationDegrees));
-		// Only text inside the guide frame (the middle of the view) counts; ignore labels and screens around it.
+		// Only text inside the card-shaped guide frame (centered, 63 x 88 portrait) counts; ignore labels and screens
+		// around it. The region is a little larger than the frame, because the preview crops the camera image slightly.
 		bool sideways = rotationDegrees is 90 or 270;
 		double w = sideways ? frame.Height : frame.Width, h = sideways ? frame.Width : frame.Height;
+		double gh = h * 0.95, gw = gh * 63 / 88 * 1.15;
+		if (gw > w * 0.95) { gw = w * 0.95; gh = Math.Min(h * 0.95, gw / 1.15 * 88 / 63); }
+		double left = (w - gw) / 2, top = (h - gh) / 2;
 		var inside = lines.Where(l =>
 		{
 			if (l.Words.Count == 0) return false;
 			double cx = l.Words.Average(x => x.X + x.Width / 2), cy = l.Words.Average(x => x.Y + x.Height / 2);
-			return cx > w * 0.08 && cx < w * 0.92 && cy > h * 0.10 && cy < h * 0.90;
+			return cx > left && cx < left + gw && cy > top && cy < top + gh;
 		}).ToList();
 		return ToScan(inside);
 	}

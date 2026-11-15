@@ -15,7 +15,8 @@ public class ScanPage : ContentPage
 	readonly Label _session = Ui.Note();
 	readonly Border _result;
 	readonly LiveCameraView _camera = new() { HeightRequest = 460 };
-	readonly Border _frame = new() { StrokeThickness = 4, BackgroundColor = Colors.Transparent, Margin = new Thickness(28, 18), InputTransparent = true };
+	// The guide frame is always card-shaped (63 x 88 mm, portrait) and centered, whatever the screen size.
+	readonly Border _frame = new() { StrokeThickness = 4, BackgroundColor = Colors.Transparent, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center, InputTransparent = true };
 	readonly Label _liveStatus = new() { TextColor = Colors.White, FontSize = 15, FontAttributes = FontAttributes.Bold, Padding = new Thickness(10, 6), HorizontalTextAlignment = TextAlignment.Center };
 	readonly Button _liveButton;
 	readonly AutoScanSession _auto = new();
@@ -51,6 +52,7 @@ public class ScanPage : ContentPage
 		var liveArea = new Grid { HeightRequest = 460, BackgroundColor = Colors.Black };
 		liveArea.Add(_camera);
 		liveArea.Add(_frame);
+		liveArea.SizeChanged += (s, e) => SizeGuide(liveArea.Width, liveArea.Height);
 		liveArea.Add(new Border
 		{
 			Content = _liveStatus, BackgroundColor = Color.FromArgb("#99000000"), StrokeThickness = 0,
@@ -141,6 +143,16 @@ public class ScanPage : ContentPage
 			_liveButton.Text = "Resume camera";
 			_liveStatus.Text = "Camera paused.";
 		}
+	}
+
+	/// <summary>Fits a card-shaped frame inside the camera area: as tall as fits, never wider than the area.</summary>
+	void SizeGuide(double width, double height)
+	{
+		if (width <= 0 || height <= 0) return;
+		double h = height * 0.88, w = h * 63 / 88;
+		if (w > width * 0.9) { w = width * 0.9; h = w * 88 / 63; }
+		_frame.WidthRequest = w;
+		_frame.HeightRequest = h;
 	}
 
 	void SetFrameColor(string hex) =>
