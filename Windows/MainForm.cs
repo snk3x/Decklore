@@ -32,7 +32,9 @@ public class MainForm : Form
     SplitContainer _scanSplit, _deckSplit;
 
     LibraryEntry _lastAdded;
-    bool _lastAddedToDeck;
+    bool _lastAddedToDeck, _lastAddedAsLoaner;
+    CheckBox _asLoaner;
+    ComboBox _showBox;
     LibrarySnapshot _undo; // the collection before the last deck action, so Undo can put it back exactly
     int _frameBusy;
     bool _busy, _refreshing;
@@ -169,9 +171,11 @@ public class MainForm : Form
             _auto.Reset();
             if (_camera.Running) SetStatus(_autoScan.Checked ? "Auto scan on. Hold a card inside the green frame." : "Auto scan off. Press Scan card (F5) for each card.");
         };
+        _asLoaner = new CheckBox { Text = "Scan as loaner (borrowed or to buy, not owned)", AutoSize = true, ForeColor = Color.DarkGoldenrod };
         checks.Controls.Add(_autoScan);
         checks.Controls.Add(_autoDetect);
         checks.Controls.Add(_addToDeck);
+        checks.Controls.Add(_asLoaner);
 
         _lastCardPic = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom };
         _lastCardLabel = new Label { AutoSize = true, MaximumSize = new Size(460, 0), Text = "No card scanned yet.", Padding = new Padding(0, 4, 0, 4) };
@@ -196,9 +200,17 @@ public class MainForm : Form
         var bar = Flow();
         _filterBox = new TextBox { Width = 240, PlaceholderText = "Filter by name or type", Margin = new Padding(3, 6, 3, 3) };
         _filterBox.TextChanged += (s, e) => RefreshCollection();
+        _showBox = Combo(120, "All cards", "Owned only", "Loaners only");
+        _showBox.Margin = new Padding(3, 6, 3, 3);
+        _showBox.SelectedIndex = 0;
+        _showBox.SelectedIndexChanged += (s, e) => RefreshCollection();
+        bar.WrapContents = true;
+        bar.AutoSize = true;
         bar.Controls.AddRange(new Control[]
         {
             _filterBox,
+            _showBox,
+            Btn("Mark loaner as bought", (s, e) => MarkBought()),
             Btn("Add 1 to deck", (s, e) => ChangeSelected(_collectionGrid, +1)),
             Btn("Take 1 out of deck", (s, e) => ChangeSelected(_collectionGrid, -1)),
             Btn("Delete from collection", (s, e) => DeleteSelected()),
@@ -215,6 +227,9 @@ public class MainForm : Form
         AddCol(_collectionGrid, "Cost", "Cost", true, 55);
         AddCol(_collectionGrid, "Owned", "Owned", false, 55);
         AddCol(_collectionGrid, "InDeck", "In deck", false, 55);
+        AddCol(_collectionGrid, "Loaned", "Loaner", false, 55);
+        AddCol(_collectionGrid, "LoanNote", "Loaner note", false, 130);
+        _collectionGrid.Columns["Loaned"].ToolTipText = "Cards you borrowed or want to buy. They don't count as owned.";
         AddCol(_collectionGrid, "Legal", "Legal", true, 85);
         AddCol(_collectionGrid, "Rating", "Rating", true, 55);
         AddMoneyCol(_collectionGrid, "Price", "Price each", 75);
@@ -235,10 +250,14 @@ public class MainForm : Form
         _optimizeBtn.Font = new Font(Font, FontStyle.Bold);
         _deckSummary = new Label { AutoSize = true, Margin = new Padding(12, 10, 3, 3) };
         _starterBtn = Btn("Starter decks...", async (s, e) => await ShowStarterDecks());
+        bar.WrapContents = true;
+        bar.AutoSize = true;
         bar.Controls.AddRange(new Control[]
         {
             Btn("Analyze", (s, e) => Analyze()),
             _optimizeBtn,
+            Btn("Budget swaps...", async (s, e) => await ShowBudgetSwaps()),
+            Btn("Loaner picks", async (s, e) => await ShowLoanerPicks()),
             _starterBtn,
             Btn("Undo optimize", (s, e) => UndoOptimize()),
             Btn("Import list...", async (s, e) => await ImportList()),
@@ -399,9 +418,11 @@ public class MainForm : Form
             var g = _collectionGrid;
             g.Columns["Cost"].HeaderText = Rules.CostHeader;
             string f = _filterBox.Text.Trim();
+            int show = _showBox.SelectedIndex;
             var items = Lib.Entries.Values
                 .Where(e => f == "" || e.Card.Name.Contains(f, StringComparison.OrdinalIgnoreCase) ||
                             e.Card.TypeLine.Contains(f, StringComparison.OrdinalIgnoreCase))
+                .Where(e => show == 0 || (show == 1 ? e.Owned > 0 : e.Loaned > 0))
                 .OrderBy(e => e.Card.Name);
             KeepSort(g, () =>
             {
@@ -409,20 +430,26 @@ public class MainForm : Form
                 foreach (var e in items)
                 {
                     int i = g.Rows.Add(e.Card.Name, e.Card.TypeLine, Rules.CostText(e.Card), e.Owned, e.InDeck,
-                                       Rules.LegalityLabel(e.Card, Format), (int)Math.Round(e.Card.Quality * 100),
+                                       e.Loaned, e.LoanNote, Rules.LegalityLabel(e.Card, Format), (int)Math.Round(e.Card.Quality * 100),
                                        Price(e.Card.PriceUsd), Price(e.Card.PriceUsd * e.Owned));
                     g.Rows[i].Tag = e;
                     if (!string.IsNullOrEmpty(e.Card.PriceSource))
                         g.Rows[i].Cells["Price"].ToolTipText = $"{e.Card.PriceSource}, updated {e.Card.PriceUpdated:d}";
                     if (Rules.LegalityLabel(e.Card, Format) is "Not legal" or "Banned" or "Forbidden")
                         g.Rows[i].Cells["Legal"].Style.ForeColor = Color.Firebrick;
+                    if (e.Loaned > 0 && e.Owned == 0) g.Rows[i].DefaultCellStyle.ForeColor = Color.DarkGoldenrod;
                 }
             });
+
+            var loaners = Lib.Entries.Values.Where(e => e.Loaned > 0).ToList();
+            double toBuy = loaners.Sum(e => e.Loaned * e.Card.PriceUsd);
+            string loanerText = loaners.Count == 0 ? ""
+                : $"   ·   Loaners {loaners.Sum(e => e.Loaned)}" + (toBuy > 0 ? $", about {Money.Format(toBuy)} to buy" : "");
 
             var owned = Lib.Entries.Values.Where(e => e.Owned > 0).ToList();
             double value = owned.Sum(e => e.Owned * e.Card.PriceUsd);
             int unpriced = owned.Count(e => e.Card.PriceUsd <= 0 && !e.Card.UnlimitedCopies);
-            _collectionSummary.Text = $"{owned.Sum(e => e.Owned)} cards owned   ·   Collection value {(value > 0 ? Money.Format(value) : "$0.00")}" +
+            _collectionSummary.Text = $"{owned.Sum(e => e.Owned)} cards owned   ·   Collection value {(value > 0 ? Money.Format(value) : "$0.00")}" + loanerText +
                                       (JustTcg.Games.ContainsKey(CurrentGame) && !JustTcg.HasKey
                                           ? $"   ·   Add a free JustTCG key in Settings to see {GameInfo.Short(CurrentGame)} prices"
                                           : unpriced > 0 ? $"   ·   {unpriced} without a price (press Refresh prices)" : "");
@@ -443,8 +470,14 @@ public class MainForm : Form
                 foreach (var e in Lib.Deck.OrderBy(e => e.Card.IsExtraDeck).ThenBy(e => e.Card.Category)
                                           .ThenBy(e => e.Card.ManaValue).ThenBy(e => e.Card.Name))
                 {
-                    int i = g.Rows.Add(e.InDeck, e.Card.Name, e.Card.TypeLine, Rules.CostText(e.Card), Price(e.Card.PriceUsd));
+                    bool loaner = e.InDeck > e.Owned && e.Loaned > 0;
+                    int i = g.Rows.Add(e.InDeck, e.Card.Name + (loaner ? "  (loaner)" : ""), e.Card.TypeLine, Rules.CostText(e.Card), Price(e.Card.PriceUsd));
                     g.Rows[i].Tag = e;
+                    if (loaner)
+                    {
+                        g.Rows[i].DefaultCellStyle.ForeColor = Color.DarkGoldenrod;
+                        g.Rows[i].Cells["Name"].ToolTipText = $"{e.InDeck - e.Owned} not owned" + (e.LoanNote != "" ? $": {e.LoanNote}" : "");
+                    }
                 }
             });
             var report = Rules.Analyze(Lib, Format);
@@ -461,10 +494,17 @@ public class MainForm : Form
         var grid = (DataGridView)sender;
         if (grid.Rows[e.RowIndex].Tag is not LibraryEntry entry) return;
         string col = grid.Columns[e.ColumnIndex].Name;
+        if (col == "LoanNote")
+        {
+            entry.LoanNote = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value)?.Trim() ?? "";
+            Save();
+            return;
+        }
         if (!int.TryParse(Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value), out int v) || v < 0) v = 0;
         _undo = null; // edited by hand, so an older deck Undo no longer applies
         if (col == "Owned") entry.Owned = v;
         else if (col == "InDeck") entry.InDeck = v;
+        else if (col == "Loaned") entry.Loaned = v;
         else return;
         Save();
         BeginInvoke(new Action(RefreshAll));
@@ -669,11 +709,13 @@ public class MainForm : Form
     void AddCard(Card c)
     {
         if (c.Game != CurrentGame) _gameBox.SelectedIndex = (int)c.Game;
-        bool toDeck = _addToDeck.Checked;
-        var e = Lib.Add(c, 1, toDeck ? 1 : 0);
+        bool toDeck = _addToDeck.Checked, asLoaner = _asLoaner.Checked;
+        var e = Lib.Add(c, asLoaner ? 0 : 1, toDeck ? 1 : 0);
+        if (asLoaner) e.Loaned++;
         _undo = null; // a deck Undo after this would also remove the card just scanned
         _lastAdded = e;
         _lastAddedToDeck = toDeck;
+        _lastAddedAsLoaner = asLoaner;
         _sessionCount++;
         _sessionValue += c.PriceUsd;
         Save();
@@ -681,7 +723,8 @@ public class MainForm : Form
         ShowCard(e);
         string price = c.PriceUsd > 0 ? Money.Format(c.PriceUsd) : "no price";
         string printing = c.ExactPrinting ? "printing matched" : "printing guessed";
-        Log($"{DateTime.Now:t}   {c.Name}   ({c.SetName} {c.Number}, {printing})   {price}   owned {e.Owned}" + (toDeck ? $", in deck {e.InDeck}" : ""));
+        Log($"{DateTime.Now:t}   {c.Name}   ({c.SetName} {c.Number}, {printing})   {price}   " +
+            (asLoaner ? $"loaner {e.Loaned}" : $"owned {e.Owned}") + (toDeck ? $", in deck {e.InDeck}" : ""));
         SetStatus(c.ExactPrinting
             ? $"Added {c.Name} ({price}). Wrong card? Press Undo last add."
             : $"Added {c.Name} ({price}). Couldn't read the set code, so press Pick printing if this isn't your version.");
@@ -731,9 +774,10 @@ public class MainForm : Form
             return;
         }
         var lib = _data.Libraries.Values.First(l => l.Entries.ContainsValue(e));
-        e.Owned = Math.Max(0, e.Owned - 1);
+        if (_lastAddedAsLoaner) e.Loaned = Math.Max(0, e.Loaned - 1);
+        else e.Owned = Math.Max(0, e.Owned - 1);
         if (_lastAddedToDeck) e.InDeck = Math.Max(0, e.InDeck - 1);
-        if (e.Owned == 0 && e.InDeck == 0) lib.Remove(e);
+        if (e.Owned == 0 && e.InDeck == 0 && e.Loaned == 0) lib.Remove(e);
         Log($"Undid {e.Card.Name}");
         _lastAdded = null;
         _sessionCount = Math.Max(0, _sessionCount - 1);
@@ -1084,6 +1128,187 @@ public class MainForm : Form
             var report = Rules.Analyze(Lib, Format);
             _reportBox.Text = Crlf("Optimizer changes\n" + string.Join("\n", log.Select(l => "  " + l)) + "\n\n" + report);
             SetStatus("Deck optimized. Press Undo optimize to go back.");
+        }
+        catch (Exception ex) { ShowError(ex); }
+        finally { SetBusy(false); }
+    }
+
+    void MarkBought()
+    {
+        var rows = _collectionGrid.SelectedRows.Cast<DataGridViewRow>().Select(r => r.Tag).OfType<LibraryEntry>()
+                                  .Where(e => e.Loaned > 0).ToList();
+        if (rows.Count == 0) { SetStatus("Select a loaner card first."); return; }
+        foreach (var e in rows)
+        {
+            e.Owned += e.Loaned;
+            e.Loaned = 0;
+            e.LoanNote = "";
+        }
+        _undo = null;
+        Save();
+        RefreshAll();
+        SetStatus(rows.Count == 1 ? $"{rows[0].Card.Name} is now owned." : $"{rows.Count} loaner cards are now owned.");
+    }
+
+    async Task ShowBudgetSwaps()
+    {
+        if (_busy) return;
+        if (Lib.DeckCount == 0) { SetStatus("Build a deck first. Budget swaps look at the cards in your deck."); return; }
+
+        using var dlg = new Form
+        {
+            Text = "Budget swaps", Width = 860, Height = 560, StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false, ShowIcon = false, Font = Font,
+        };
+        var top = Flow();
+        var max = new NumericUpDown { Minimum = 0.25m, Maximum = 1000, DecimalPlaces = 2, Increment = 1, Width = 80,
+                                      Value = (decimal)Math.Clamp(_data.BudgetLimit, 0.25, 1000), Margin = new Padding(3, 7, 3, 3) };
+        var info = new Label { AutoSize = true, Margin = new Padding(12, 10, 3, 3), ForeColor = Color.DimGray };
+        var list = new ListView { Dock = DockStyle.Fill, View = View.Details, CheckBoxes = true, FullRowSelect = true, GridLines = true };
+        list.Columns.Add("Replace", 190);
+        list.Columns.Add("Price", 70, HorizontalAlignment.Right);
+        list.Columns.Add("With", 190);
+        list.Columns.Add("Price", 70, HorizontalAlignment.Right);
+        list.Columns.Add("Why", 300);
+        // One choice per card: checking an option unchecks the other options for the same card.
+        list.ItemChecked += (s, e) =>
+        {
+            if (!e.Item.Checked || e.Item.Tag is not (BudgetSwap swap, SwapOption)) return;
+            foreach (ListViewItem other in list.Items)
+                if (other != e.Item && other.Checked && other.Tag is (BudgetSwap os, SwapOption) && os == swap) other.Checked = false;
+        };
+        var find = new Button { Text = "Find swaps", AutoSize = true, Height = 30 };
+        top.Controls.AddRange(new Control[] { Lbl("Max price per card $"), max, find, info });
+
+        var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(4) };
+        var apply = new Button { Text = "Apply checked swaps", AutoSize = true, Height = 30, Enabled = false };
+        var close = new Button { Text = "Close", AutoSize = true, Height = 30, DialogResult = DialogResult.Cancel };
+        bottom.Controls.Add(close);
+        bottom.Controls.Add(apply);
+        bottom.Controls.Add(new Label { AutoSize = true, Margin = new Padding(3, 9, 12, 0), ForeColor = Color.DimGray,
+                                        Text = "Nothing changes until you apply. Swapped-in cards you don't own become loaners." });
+        dlg.Controls.Add(list);
+        dlg.Controls.Add(bottom);
+        dlg.Controls.Add(top);
+        dlg.CancelButton = close;
+
+        var game = CurrentGame;
+        var lib = Lib;
+        string format = Format;
+        var rules = Rules;
+        List<BudgetSwap> swaps = null;
+        var cts = new CancellationTokenSource();
+        dlg.FormClosed += (s, e) => cts.Cancel();
+
+        find.Click += async (s, e) =>
+        {
+            find.Enabled = apply.Enabled = false;
+            list.Items.Clear();
+            _data.BudgetLimit = (double)max.Value;
+            Save();
+            try
+            {
+                swaps = await BudgetAdvisor.SuggestAsync(game, lib, format, rules, Source(game), (double)max.Value,
+                    name => { if (!dlg.IsDisposed) dlg.BeginInvoke(() => info.Text = $"Checking {name}..."); }, cts.Token);
+                if (dlg.IsDisposed) return;
+                list.BeginUpdate();
+                foreach (var swap in swaps.OrderByDescending(x => x.BestSaving))
+                {
+                    if (swap.Options.Count == 0)
+                    {
+                        var none = list.Items.Add($"{swap.Copies}x {swap.Current.Name}");
+                        none.SubItems.Add(Money.Format(swap.Current.PriceUsd));
+                        none.SubItems.Add("No cheaper option found");
+                        none.SubItems.Add("");
+                        none.SubItems.Add("");
+                        none.ForeColor = Color.DimGray;
+                        continue;
+                    }
+                    bool first = true;
+                    foreach (var o in swap.Options)
+                    {
+                        var item = list.Items.Add(first ? $"{swap.Copies}x {swap.Current.Name}" : "");
+                        item.SubItems.Add(first ? Money.Format(swap.Current.PriceUsd) : "");
+                        item.SubItems.Add(o.Card.Name + (o.Card.SetName != "" ? $" ({o.Card.SetName})" : ""));
+                        item.SubItems.Add(o.Price > 0 ? Money.Format(o.Price) : "unknown");
+                        item.SubItems.Add($"{o.Kind}: {o.Why}");
+                        item.Tag = (swap, o);
+                        item.ToolTipText = o.Why;
+                        first = false;
+                    }
+                }
+                list.EndUpdate();
+                int count = swaps.Count(x => x.Options.Count > 0);
+                info.Text = swaps.Count == 0 ? $"Every card in the deck is {Money.Format((double)max.Value)} or less, or has no price yet."
+                          : $"{count} of {swaps.Count} cards over {Money.Format((double)max.Value)} have cheaper options. Check one option per card.";
+                apply.Enabled = count > 0;
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { if (!dlg.IsDisposed) info.Text = ex is RateLimitedException ? ex.Message : "Couldn't finish: " + ex.Message; }
+            finally { if (!dlg.IsDisposed) find.Enabled = true; }
+        };
+
+        apply.Click += (s, e) =>
+        {
+            var picks = list.CheckedItems.Cast<ListViewItem>().Select(i => i.Tag).OfType<(BudgetSwap swap, SwapOption option)>().ToList();
+            if (picks.Count == 0) { info.Text = "Check the swaps you want first."; return; }
+            _undo = new LibrarySnapshot(lib);
+            double before = lib.Deck.Sum(x => x.InDeck * x.Card.PriceUsd);
+            var lines = new List<string>();
+            foreach (var (swap, option) in picks)
+            {
+                BudgetAdvisor.ApplySwap(lib, swap, option);
+                lines.Add($"  {swap.Copies}x {swap.Current.Name}  ->  {option.Card.Name}" + (option.Price > 0 ? $" ({Money.Format(option.Price)})" : ""));
+            }
+            double after = lib.Deck.Sum(x => x.InDeck * x.Card.PriceUsd);
+            Save();
+            RefreshAll();
+            var report = rules.Analyze(lib, format);
+            _reportBox.Text = Crlf($"Budget swaps applied\n{string.Join("\n", lines)}\n\nDeck value {Money.Format(before)} -> {Money.Format(after)}\n" +
+                                   "Cards you don't own were added as loaners (Collection tab, Loaners only).\n\n" + report);
+            SetStatus("Budget swaps applied. Press Undo optimize to go back.");
+            dlg.Close();
+        };
+
+        dlg.Shown += (s, e) => find.PerformClick();
+        dlg.ShowDialog(this);
+        await Task.CompletedTask;
+    }
+
+    async Task ShowLoanerPicks()
+    {
+        if (_busy) return;
+        if (!Lib.Entries.Values.Any(e => e.Loaned > 0))
+        {
+            MessageBox.Show(this, "You have no loaner cards yet.\n\nTick \"Scan as loaner\" on the Scan tab and scan (or add by name) the cards " +
+                                  "you could borrow or buy. Then press Loaner picks to see which ones would improve this deck.",
+                            "Loaner picks", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        SetBusy(true, "Checking which loaners would improve the deck...");
+        LoanerReport report;
+        try { report = await LoanerAdvisor.RecommendAsync(Lib, Format, Rules); }
+        catch (Exception ex) { ShowError(ex); return; }
+        finally { SetBusy(false); }
+
+        _reportBox.Text = Crlf("Loaner picks\n\n" + LoanerAdvisor.Describe(report));
+        RefreshAll();
+        if (report.Picks.Count == 0) { SetStatus("None of your loaners would improve this deck."); return; }
+        if (MessageBox.Show(this, $"Use the deck with these loaners? Deck health {report.HealthOwnedOnly} -> {report.HealthWithLoaners}.\n\n" +
+                                  "Your owned cards stay the same. Undo optimize puts the current deck back.",
+                            "Loaner picks", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            SetStatus("Loaner picks shown. Nothing was changed.");
+            return;
+        }
+        SetBusy(true, "Building the deck with loaners...");
+        try
+        {
+            _undo = new LibrarySnapshot(Lib);
+            await LoanerAdvisor.UseDeckAsync(Lib, Format, Rules);
+            Save();
+            RefreshAll();
+            SetStatus("Deck built with loaners (marked \"loaner\"). Press Undo optimize to go back.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { SetBusy(false); }

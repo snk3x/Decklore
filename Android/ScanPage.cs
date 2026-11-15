@@ -22,9 +22,9 @@ public class ScanPage : ContentPage
 	readonly AutoScanSession _auto = new();
 	bool _liveWanted = true, _permissionAsked;
 	bool _sound = Preferences.Default.Get("scan-sound", true);
-	bool _autoDetect = true, _addToDeck, _working;
+	bool _autoDetect = true, _addToDeck, _asLoaner, _working;
 	LibraryEntry _last;
-	bool _lastToDeck;
+	bool _lastToDeck, _lastAsLoaner;
 	int _sessionCount;
 	double _sessionValue;
 
@@ -88,6 +88,7 @@ public class ScanPage : ContentPage
 					},
 					Ui.Toggle("Detect the game automatically", true, v => _autoDetect = v),
 					Ui.Toggle("Also add scanned cards to the deck", false, v => _addToDeck = v),
+					Ui.Toggle("Scan as loaner (borrowed or to buy, not owned)", false, v => _asLoaner = v),
 					new Grid
 					{
 						ColumnDefinitions = { new(GridLength.Auto), new(GridLength.Star) }, ColumnSpacing = 8,
@@ -270,7 +271,9 @@ public class ScanPage : ContentPage
 	void AddCard(Card c)
 	{
 		if (c.Game != AppState.Game) AppState.Game = c.Game;
-		var e = AppState.Lib.Add(c, 1, _addToDeck ? 1 : 0);
+		var e = AppState.Lib.Add(c, _asLoaner ? 0 : 1, _addToDeck ? 1 : 0);
+		if (_asLoaner) e.Loaned++;
+		_lastAsLoaner = _asLoaner;
 		AppState.Undo = null; // a deck Undo after this would also remove the card just scanned
 		_last = e;
 		_lastToDeck = _addToDeck;
@@ -279,7 +282,7 @@ public class ScanPage : ContentPage
 		AppState.NotifyChanged();
 		ShowCard(e);
 		string price = c.PriceUsd > 0 ? Money.Format(c.PriceUsd) : "no price";
-		SetBusy(false, c.ExactPrinting ? $"Added {c.Name} ({price})." : $"Added {c.Name} ({price}). Tap Pick printing if this isn't your version.");
+		SetBusy(false, c.ExactPrinting ? $"Added {c.Name}{(_asLoaner ? " as a loaner" : "")} ({price})." : $"Added {c.Name}{(_asLoaner ? " as a loaner" : "")} ({price}). Tap Pick printing if this isn't your version.");
 	}
 
 	void ShowCard(LibraryEntry e)
@@ -290,7 +293,7 @@ public class ScanPage : ContentPage
 		_cardName.Text = c.Name;
 		string printing = c.ExactPrinting ? "matched from the card" : "best guess";
 		_cardInfo.Text = $"{c.TypeLine}\n{c.SetName} {(c.Number != "" ? "#" + c.Number : "")} ({printing})\n" +
-		                 $"{AppState.Format}: {AppState.CurrentRules.LegalityLabel(c, AppState.Format)}   ·   Owned: {e.Owned}";
+		                 $"{AppState.Format}: {AppState.CurrentRules.LegalityLabel(c, AppState.Format)}   ·   Owned: {e.Owned}" + (e.Loaned > 0 ? $"   ·   Loaner: {e.Loaned}" : "");
 		_cardValue.Text = c.PriceUsd > 0 ? $"{Money.Format(c.PriceUsd)}  ({c.PriceSource})" : "No price listed";
 		_session.Text = SessionText();
 	}
@@ -304,9 +307,10 @@ public class ScanPage : ContentPage
 		var e = _last;
 		var lib = AppState.Data.Libraries.Values.FirstOrDefault(l => e != null && l.Entries.ContainsValue(e));
 		if (lib == null) { _status.Text = "Nothing to undo."; return Task.CompletedTask; }
-		e.Owned = Math.Max(0, e.Owned - 1);
+		if (_lastAsLoaner) e.Loaned = Math.Max(0, e.Loaned - 1);
+		else e.Owned = Math.Max(0, e.Owned - 1);
 		if (_lastToDeck) e.InDeck = Math.Max(0, e.InDeck - 1);
-		if (e.Owned == 0 && e.InDeck == 0) lib.Remove(e);
+		if (e.Owned == 0 && e.InDeck == 0 && e.Loaned == 0) lib.Remove(e);
 		_sessionCount = Math.Max(0, _sessionCount - 1);
 		_sessionValue = Math.Max(0, _sessionValue - e.Card.PriceUsd);
 		_last = null;

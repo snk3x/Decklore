@@ -93,6 +93,10 @@ public class LibraryEntry
     public Card Card { get; set; }
     public int Owned { get; set; }
     public int InDeck { get; set; }
+    /// <summary>Loaner copies: cards you don't own but could use (borrowed, or thinking of buying). Not counted in collection value.</summary>
+    public int Loaned { get; set; }
+    /// <summary>Who lent it, or where and for how much you could buy it.</summary>
+    public string LoanNote { get; set; } = "";
 }
 
 public class Library
@@ -131,6 +135,8 @@ public class AppData
     public Dictionary<Game, Library> Libraries { get; set; } = new();
     public Dictionary<Game, string> Formats { get; set; } = new();
     public Game LastGame { get; set; }
+    /// <summary>Budget swaps suggest replacements for deck cards above this price (US dollars).</summary>
+    public double BudgetLimit { get; set; } = 5;
 
     public Library Get(Game g)
     {

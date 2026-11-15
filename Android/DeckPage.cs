@@ -37,6 +37,7 @@ public class DeckPage : ContentPage
 					_format,
 					_summary,
 					Ui.Row(Ui.Primary("Optimize", Optimize), Ui.Secondary("Analyze", () => { Analyze(); return Task.CompletedTask; })),
+					Ui.Row(Ui.Secondary("Budget swaps", BudgetSwapsAsync), Ui.Secondary("Loaner picks", LoanerPicksAsync)),
 					Ui.Row(Ui.Secondary("Undo", UndoAsync), _starter),
 					Ui.Row(Ui.Secondary("Share list", ShareList), Ui.Secondary("Import from clipboard", ImportFromClipboard)),
 					Ui.Secondary("Clear deck", ClearDeck),
@@ -75,11 +76,14 @@ public class DeckPage : ContentPage
 		foreach (var e in AppState.Lib.Deck.OrderBy(e => e.Card.IsExtraDeck).ThenBy(e => e.Card.Category).ThenBy(e => e.Card.ManaValue).ThenBy(e => e.Card.Name))
 		{
 			string cost = rules.CostText(e.Card);
-			_deckList.Children.Add(new Label
+			bool loaner = e.InDeck > e.Owned && e.Loaned > 0;
+			var label = new Label
 			{
-				Text = $"{e.InDeck}×  {e.Card.Name}" + (cost != "" ? $"   ({rules.CostHeader} {cost})" : ""),
+				Text = $"{e.InDeck}×  {e.Card.Name}" + (cost != "" ? $"   ({rules.CostHeader} {cost})" : "") + (loaner ? "   (loaner)" : ""),
 				FontSize = 14,
-			});
+			};
+			if (loaner) label.TextColor = Ui.Warn;
+			_deckList.Children.Add(label);
 		}
 		if (_deckList.Children.Count == 0) _deckList.Children.Add(Ui.Note("The deck is empty."));
 	}
@@ -103,6 +107,101 @@ public class DeckPage : ContentPage
 			var log = await AppState.CurrentRules.OptimizeAsync(AppState.Lib, AppState.Format, CancellationToken.None);
 			AppState.NotifyChanged();
 			_report.Text = "Optimizer changes\n" + string.Join("\n", log.Select(l => "  " + l)) + "\n\n" +
+			               AppState.CurrentRules.Analyze(AppState.Lib, AppState.Format).ToString().Trim();
+		}
+		catch (Exception ex) { _report.Text = AppState.FriendlyError(ex); }
+		finally { SetBusy(false); }
+	}
+
+	async Task BudgetSwapsAsync()
+	{
+		if (_working) return;
+		if (AppState.Lib.DeckCount == 0) { _report.Text = "Build a deck first. Budget swaps look at the cards in your deck."; return; }
+		string input = await DisplayPromptAsync("Budget swaps", "Suggest cheaper cards for deck cards that cost more than this (USD):",
+			"Find", "Cancel", initialValue: AppState.Data.BudgetLimit.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+			keyboard: Keyboard.Numeric);
+		if (input == null) return;
+		if (!double.TryParse(input.Replace("$", "").Replace(",", ".").Trim(), System.Globalization.NumberStyles.Float,
+		                     System.Globalization.CultureInfo.InvariantCulture, out double max) || max <= 0)
+		{
+			_report.Text = "Enter a price like 5 or 2.50.";
+			return;
+		}
+		AppState.Data.BudgetLimit = max;
+		AppState.Save();
+
+		var lib = AppState.Lib;
+		string format = AppState.Format;
+		var rules = AppState.CurrentRules;
+		List<BudgetSwap> swaps;
+		SetBusy(true);
+		try
+		{
+			swaps = await BudgetAdvisor.SuggestAsync(AppState.Game, lib, format, rules, AppState.Source, max,
+				name => MainThread.BeginInvokeOnMainThread(() => _report.Text = $"Checking {name}..."));
+		}
+		catch (Exception ex) { _report.Text = AppState.FriendlyError(ex); return; }
+		finally { SetBusy(false); }
+
+		if (swaps.Count == 0) { _report.Text = $"Every card in the deck is {Money.Format(max)} or less, or has no price yet."; return; }
+		var withOptions = swaps.Where(s => s.Options.Count > 0).OrderByDescending(s => s.BestSaving).ToList();
+		if (withOptions.Count == 0)
+		{
+			_report.Text = $"No cheaper options found for: {string.Join(", ", swaps.Select(s => s.Current.Name))}.";
+			return;
+		}
+
+		// One choice per card. Nothing changes until a replacement is picked.
+		var applied = new List<string>();
+		double before = lib.Deck.Sum(x => x.InDeck * x.Card.PriceUsd);
+		bool snapshotTaken = false;
+		foreach (var swap in withOptions)
+		{
+			var labels = swap.Options.Select((o, n) => $"{n + 1}. {o.Card.Name}" + (o.Card.SetName != "" ? $" [{o.Card.SetName}]" : "") +
+			                                           $" ({(o.Price > 0 ? Money.Format(o.Price) : "price unknown")}), {o.Kind.ToLowerInvariant()}").ToArray();
+			string title = $"Replace {swap.Copies}× {swap.Current.Name} ({Money.Format(swap.Current.PriceUsd)} each)?";
+			string choice = await DisplayActionSheetAsync(title, "Stop here", "Keep this card", labels);
+			if (choice == null || choice == "Stop here") break;
+			int i = Array.IndexOf(labels, choice);
+			if (i < 0) continue;
+			if (!snapshotTaken) { AppState.SnapshotDeck(); snapshotTaken = true; }
+			var option = swap.Options[i];
+			BudgetAdvisor.ApplySwap(lib, swap, option);
+			applied.Add($"  {swap.Copies}× {swap.Current.Name} → {option.Card.Name}" + (option.Price > 0 ? $" ({Money.Format(option.Price)})" : ""));
+		}
+		if (applied.Count == 0) { _report.Text = "No swaps applied. Nothing was changed."; return; }
+		double after = lib.Deck.Sum(x => x.InDeck * x.Card.PriceUsd);
+		AppState.NotifyChanged();
+		_report.Text = $"Budget swaps applied\n{string.Join("\n", applied)}\n\nDeck value {Money.Format(before)} → {Money.Format(after)}\n" +
+		               "Cards you don't own were added as loaners. Undo puts the deck back.\n\n" + rules.Analyze(lib, format).ToString().Trim();
+	}
+
+	async Task LoanerPicksAsync()
+	{
+		if (_working) return;
+		if (!AppState.Lib.Entries.Values.Any(e => e.Loaned > 0))
+		{
+			await DisplayAlertAsync("Loaner picks", "You have no loaner cards yet.\n\nTurn on \"Scan as loaner\" on the Scan tab and scan (or add by name) " +
+			                                        "the cards you could borrow or buy. Then tap Loaner picks.", "OK");
+			return;
+		}
+		LoanerReport report;
+		SetBusy(true);
+		try { report = await LoanerAdvisor.RecommendAsync(AppState.Lib, AppState.Format, AppState.CurrentRules); }
+		catch (Exception ex) { _report.Text = AppState.FriendlyError(ex); return; }
+		finally { SetBusy(false); }
+
+		_report.Text = "Loaner picks\n\n" + LoanerAdvisor.Describe(report);
+		if (report.Picks.Count == 0) return;
+		if (!await DisplayAlertAsync("Loaner picks", $"Use the deck with these loaners? Health {report.HealthOwnedOnly} → {report.HealthWithLoaners}. " +
+		                                             "Your owned cards stay the same, and Undo puts the current deck back.", "Use deck", "Not now")) return;
+		SetBusy(true);
+		try
+		{
+			AppState.SnapshotDeck();
+			await LoanerAdvisor.UseDeckAsync(AppState.Lib, AppState.Format, AppState.CurrentRules);
+			AppState.NotifyChanged();
+			_report.Text = "Deck built with loaners (marked \"loaner\"). Undo puts the previous deck back.\n\n" +
 			               AppState.CurrentRules.Analyze(AppState.Lib, AppState.Format).ToString().Trim();
 		}
 		catch (Exception ex) { _report.Text = AppState.FriendlyError(ex); }

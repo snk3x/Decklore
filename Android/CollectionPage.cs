@@ -8,6 +8,7 @@ public class CollectionPage : ContentPage
 	public record Row(LibraryEntry Entry, string Name, string Detail, string Price, Color LegalColor);
 
 	readonly SearchBar _search = new() { Placeholder = "Filter by name or type" };
+	readonly Picker _show = new() { Title = "Show", ItemsSource = new[] { "All cards", "Owned only", "Loaners only" }, SelectedIndex = 0 };
 	readonly Label _summary = new() { FontAttributes = FontAttributes.Bold };
 	readonly CollectionView _list;
 	bool _dirty = true;
@@ -16,6 +17,7 @@ public class CollectionPage : ContentPage
 	{
 		Title = "Collection";
 		_search.TextChanged += (s, e) => Refresh();
+		_show.SelectedIndexChanged += (s, e) => Refresh();
 		AppState.Changed += () => { _dirty = true; if (IsVisible) Refresh(); };
 
 		_list = new CollectionView
@@ -53,6 +55,7 @@ public class CollectionPage : ContentPage
 				Ui.Title("Collection"),
 				Ui.GamePicker(),
 				_search,
+				_show,
 				_summary,
 				Ui.Row(Ui.Secondary("Refresh prices", RefreshPrices), Ui.Secondary("Share as CSV", ShareCsv)),
 			}
@@ -74,34 +77,57 @@ public class CollectionPage : ContentPage
 		_dirty = false;
 		var rules = AppState.CurrentRules;
 		string f = _search.Text?.Trim() ?? "";
+		int show = Math.Max(0, _show.SelectedIndex);
 		_list.ItemsSource = AppState.Lib.Entries.Values
 			.Where(e => f == "" || e.Card.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || e.Card.TypeLine.Contains(f, StringComparison.OrdinalIgnoreCase))
+			.Where(e => show == 0 || (show == 1 ? e.Owned > 0 : e.Loaned > 0))
 			.OrderBy(e => e.Card.Name)
 			.Select(e =>
 			{
 				string legal = rules.LegalityLabel(e.Card, AppState.Format);
 				string detail = $"{e.Card.TypeLine}\n{e.Card.SetName} {e.Card.Number}   ·   Owned {e.Owned}   ·   In deck {e.InDeck}" +
-				                (legal is "Legal" ? "" : $"   ·   {legal}");
+				                (e.Loaned > 0 ? $"   ·   Loaner {e.Loaned}" : "") +
+				                (legal is "Legal" ? "" : $"   ·   {legal}") +
+				                (e.Loaned > 0 && e.LoanNote != "" ? $"\n{e.LoanNote}" : "");
 				return new Row(e, e.Card.Name, detail, e.Card.PriceUsd > 0 ? Money.Format(e.Card.PriceUsd) : "", Ui.Good);
 			})
 			.ToList();
 
 		var owned = AppState.Lib.Entries.Values.Where(e => e.Owned > 0).ToList();
 		double value = owned.Sum(e => e.Owned * e.Card.PriceUsd);
+		var loaners = AppState.Lib.Entries.Values.Where(e => e.Loaned > 0).ToList();
+		double toBuy = loaners.Sum(e => e.Loaned * e.Card.PriceUsd);
 		_summary.Text = $"{owned.Sum(e => e.Owned)} cards owned   ·   Value {(value > 0 ? Money.Format(value) : "$0.00")}" +
+		                (loaners.Count > 0 ? $"\nLoaners {loaners.Sum(e => e.Loaned)}" + (toBuy > 0 ? $", about {Money.Format(toBuy)} to buy" : "") : "") +
 		                (JustTcg.Games.ContainsKey(AppState.Game) && !JustTcg.HasKey ? "\nAdd a free JustTCG key in Settings for prices." : "");
 	}
 
 	async Task Actions(LibraryEntry e)
 	{
-		string choice = await DisplayActionSheetAsync(e.Card.Name, "Cancel", "Delete from collection",
-			"Add 1 to deck", "Take 1 out of deck", "I own one more", "I own one less", "Pick printing");
+		var options = new List<string> { "Add 1 to deck", "Take 1 out of deck", "I own one more", "I own one less", "One more loaner" };
+		if (e.Loaned > 0) options.AddRange(new[] { "One less loaner", "Loaner note", "Mark loaner as bought" });
+		options.Add("Pick printing");
+		string choice = await DisplayActionSheetAsync(e.Card.Name, "Cancel", "Delete from collection", options.ToArray());
 		switch (choice)
 		{
 			case "Add 1 to deck": e.InDeck++; break;
 			case "Take 1 out of deck": e.InDeck = Math.Max(0, e.InDeck - 1); break;
 			case "I own one more": e.Owned++; break;
 			case "I own one less": e.Owned = Math.Max(0, e.Owned - 1); break;
+			case "One more loaner": e.Loaned++; break;
+			case "One less loaner": e.Loaned = Math.Max(0, e.Loaned - 1); break;
+			case "Loaner note":
+				string note = await DisplayPromptAsync("Loaner note", "Who it's from, or where to buy it.", "Save", "Cancel",
+				                                       initialValue: e.LoanNote, maxLength: 80);
+				if (note == null) return;
+				e.LoanNote = note.Trim();
+				AppState.NotifyChanged();
+				return;
+			case "Mark loaner as bought":
+				e.Owned += e.Loaned;
+				e.Loaned = 0;
+				e.LoanNote = "";
+				break;
 			case "Pick printing": await Printing.PickAsync(this, e); return;
 			case "Delete from collection":
 				if (!await DisplayAlertAsync("Delete card", $"Delete {e.Card.Name} from your collection? This can't be undone.", "Delete", "Cancel")) return;
@@ -142,7 +168,7 @@ public class CollectionPage : ContentPage
 
 	async Task ShareCsv()
 	{
-		if (!AppState.Lib.Entries.Values.Any(e => e.Owned > 0)) return;
+		if (!AppState.Lib.Entries.Values.Any(e => e.Owned > 0 || e.Loaned > 0)) return;
 		string path = Path.Combine(FileSystem.CacheDirectory, $"{GameInfo.Short(AppState.Game)} collection.csv");
 		File.WriteAllText(path, DeckList.Csv(AppState.Lib), new System.Text.UTF8Encoding(true));
 		await Share.Default.RequestAsync(new ShareFileRequest { Title = "Collection", File = new ShareFile(path, "text/csv") });

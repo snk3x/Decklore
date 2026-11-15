@@ -231,6 +231,14 @@ public class ScryfallSource : ICardSource
         return pick;
     }
 
+    /// <summary>Runs a Scryfall search (Scryfall syntax) and returns up to <paramref name="max"/> cards, most-played first.</summary>
+    public async Task<List<Card>> SearchAsync(string query, int max, CancellationToken ct = default)
+    {
+        string url = "https://api.scryfall.com/cards/search?order=edhrec&q=" + Uri.EscapeDataString(query);
+        using var doc = await Http.GetJsonAsync(url, ct);
+        return doc == null ? new List<Card>() : doc.RootElement.A("data").Take(max).Select(Parse).ToList();
+    }
+
     public Task<Card> ExactAsync(string name, CancellationToken ct = default) =>
         Get("https://api.scryfall.com/cards/named?exact=" + Uri.EscapeDataString(name), ct);
 

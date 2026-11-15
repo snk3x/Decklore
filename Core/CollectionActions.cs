@@ -63,11 +63,11 @@ public static class DeckList
     {
         static string Q(string s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
         static string N(double v) => v > 0 ? v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) : "";
-        var sb = new StringBuilder("Name,Set,Number,Type,Owned,In deck,Price each (USD),Value owned (USD),Price source,Price date\r\n");
-        foreach (var e in lib.Entries.Values.Where(e => e.Owned > 0 || e.InDeck > 0).OrderBy(e => e.Card.Name))
+        var sb = new StringBuilder("Name,Set,Number,Type,Owned,Loaner,In deck,Price each (USD),Value owned (USD),Price source,Price date\r\n");
+        foreach (var e in lib.Entries.Values.Where(e => e.Owned > 0 || e.InDeck > 0 || e.Loaned > 0).OrderBy(e => e.Card.Name))
         {
             var c = e.Card;
-            sb.Append(string.Join(",", Q(c.Name), Q(c.SetName), Q(c.Number), Q(c.TypeLine), e.Owned, e.InDeck,
+            sb.Append(string.Join(",", Q(c.Name), Q(c.SetName), Q(c.Number), Q(c.TypeLine), e.Owned, e.Loaned, e.InDeck,
                                   N(c.PriceUsd), N(c.PriceUsd * e.Owned), Q(c.PriceSource), Q(c.PriceUpdated?.ToString("d") ?? "")));
             sb.Append("\r\n");
         }
@@ -83,12 +83,12 @@ public static class DeckList
 public sealed class LibrarySnapshot
 {
     readonly Library _library;
-    readonly Dictionary<LibraryEntry, (int owned, int inDeck)> _counts;
+    readonly Dictionary<LibraryEntry, (int owned, int inDeck, int loaned)> _counts;
 
     public LibrarySnapshot(Library library)
     {
         _library = library;
-        _counts = library.Entries.Values.ToDictionary(e => e, e => (e.Owned, e.InDeck));
+        _counts = library.Entries.Values.ToDictionary(e => e, e => (e.Owned, e.InDeck, e.Loaned));
     }
 
     /// <summary>True when this snapshot belongs to that collection (each game has its own).</summary>
@@ -100,7 +100,7 @@ public sealed class LibrarySnapshot
         int removed = 0;
         foreach (var e in _library.Entries.Values.ToList())
         {
-            if (_counts.TryGetValue(e, out var c)) { e.Owned = c.owned; e.InDeck = c.inDeck; }
+            if (_counts.TryGetValue(e, out var c)) { e.Owned = c.owned; e.InDeck = c.inDeck; e.Loaned = c.loaned; }
             else { _library.Remove(e); removed++; }
         }
         return removed;
