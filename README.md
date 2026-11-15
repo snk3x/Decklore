@@ -46,10 +46,13 @@ dotnet build Android\TcgMobile.csproj -c Release
 
 1. **Scan cards.** Click Start camera and hold one card flat inside the green frame. With **Auto scan** on (the default), the card is added on its own: the frame turns gold while checking, then flashes green with a sound. Show the next card. To add another copy of the same card, take it away for a second and show it again. You can also press F5, load a photo, or type a name. The game is detected automatically.
 2. **Collection.** Every scanned card lands here. Edit Owned or In deck directly in the yellow columns.
+   - **Loaner cards** are cards you could borrow or want to buy. Tick **Scan as loaner** on the Scan tab (or type a count in the Loaner column) and add a note like "from Alex". Loaners never count as owned. Use **Show: Loaners only** to see them with the cost to buy, and **Mark loaner as bought** when you get one.
 3. **Deck.** Pick the format at the top, then:
    - **Analyze** checks the deck against the format's rules and gives a health score.
    - **Optimize from my collection** rebuilds the deck using only cards you own, plus free basic lands or basic Energy.
-   - **Undo optimize** puts the previous deck back.
+   - **Budget swaps** looks at deck cards above a max price you set and suggests a cheaper printing of the same card, or (Magic, Gundam, Cyberpunk) a cheaper card that does a similar job. Tick the swaps you want; swapped-in cards you don't own become loaners, so the loaner list doubles as a shopping list.
+   - **Loaner picks** compares the best deck from your owned cards with the best deck using your loaners too, and lists which loaners would help and what they'd replace. Nothing changes unless you choose to use that deck.
+   - **Undo optimize** puts the previous deck back (also after budget swaps and loaner picks).
    - **Import list** and **Export list** handle plain text decklists.
    - **Starter decks** (Gundam only) lists starter decks ST01 to ST14 and shows how many of each deck's cards you've scanned, highlighting the likely match. Pick yours to build its 50-card deck and 10-card Resource Deck in one click, and optionally add the box's cards to your collection. Then scan your booster cards and press Optimize to upgrade it.
 4. **How to play.** A beginner's guide to the game picked at the top: how to win, setup, turn steps, card types, combat and key terms, with a link to the official rules.

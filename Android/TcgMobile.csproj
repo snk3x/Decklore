@@ -13,8 +13,8 @@
 
 		<ApplicationTitle>TCG deck scanner</ApplicationTitle>
 		<ApplicationId>com.snk3x.tcgdeckscanner</ApplicationId>
-		<ApplicationDisplayVersion>1.1</ApplicationDisplayVersion>
-		<ApplicationVersion>2</ApplicationVersion>
+		<ApplicationDisplayVersion>1.2</ApplicationDisplayVersion>
+		<ApplicationVersion>3</ApplicationVersion>
 
 		<SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
 		<AndroidPackageFormat>apk</AndroidPackageFormat>
