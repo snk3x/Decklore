@@ -18,6 +18,8 @@
 
 		<SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
 		<AndroidPackageFormat>apk</AndroidPackageFormat>
+		<!-- Include 32-bit ARM so older and budget phones (like the LG K30) can install it, not only 64-bit ones. -->
+		<RuntimeIdentifiers>android-arm;android-arm64;android-x64</RuntimeIdentifiers>
 	</PropertyGroup>
 
 	<!-- Release builds are signed with the owner's permanent key when it's on this computer (it is never in the repository).

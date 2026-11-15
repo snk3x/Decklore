@@ -39,7 +39,7 @@ public class DeckPage : ContentPage
 					Ui.Row(Ui.Primary("Optimize", Optimize), Ui.Secondary("Analyze", () => { Analyze(); return Task.CompletedTask; })),
 					Ui.Row(Ui.Secondary("Budget swaps", BudgetSwapsAsync), Ui.Secondary("Loaner picks", LoanerPicksAsync)),
 					Ui.Row(Ui.Secondary("Undo", UndoAsync), _starter),
-					Ui.Row(Ui.Secondary("Share list", ShareList), Ui.Secondary("Import from clipboard", ImportFromClipboard)),
+					Ui.Row(Ui.Secondary("Share list", ShareList), Ui.Secondary("Paste a list", ImportFromClipboard)),
 					Ui.Secondary("Clear deck", ClearDeck),
 					_busy,
 					Ui.Card(_report),
@@ -261,7 +261,7 @@ public class DeckPage : ContentPage
 		var lines = DeckList.Parse(text);
 		if (lines.Count == 0)
 		{
-			await DisplayAlertAsync("Import", "Copy a decklist first (one card per line, like \"4 Lightning Bolt\"), then tap Import again.", "OK");
+			await DisplayAlertAsync("Import", "Copy a decklist first (one card per line, like \"4 Lightning Bolt\"), then tap Paste a list again.", "OK");
 			return;
 		}
 		bool replace = await DisplayAlertAsync("Import", $"Found {lines.Count} lines. Replace the current deck, or add these cards to it?", "Replace", "Add");
