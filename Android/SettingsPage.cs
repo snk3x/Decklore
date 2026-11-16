@@ -7,6 +7,7 @@ public class SettingsPage : ContentPage
 {
 	readonly Entry _key = new() { IsPassword = true, Placeholder = "Paste your API key (starts with tcg_)" };
 	readonly Label _result = Ui.Note();
+	readonly Label _backupResult = Ui.Note();
 
 	public SettingsPage()
 	{
@@ -26,6 +27,10 @@ public class SettingsPage : ContentPage
 					_key,
 					Ui.Row(Ui.Primary("Test and save", SaveKey), Ui.Secondary("Remove key", RemoveKey)),
 					_result,
+					Ui.Heading("Backup"),
+					new Label { Text = "Save all your collections, loaners and saved decks to one file. Keep it in Google Drive or anywhere safe, and restore it here or in the Windows app. Your JustTCG key isn't included." },
+					Ui.Row(Ui.Primary("Back up", BackUpAsync), Ui.Secondary("Restore", RestoreAsync)),
+					_backupResult,
 					Ui.Heading("About"),
 					new Label { Text = $"Decklore {AppInfo.Current.VersionString}. An unofficial fan project, not affiliated with the companies behind these games." },
 					new Label { Text = "Thanks to Levi for field testing the app and suggesting improvements." },
@@ -56,6 +61,53 @@ public class SettingsPage : ContentPage
 			AppState.NotifyChanged();
 		}
 		catch (Exception ex) { _result.Text = AppState.FriendlyError(ex); }
+	}
+
+	/// <summary>Writes the backup file and opens the share sheet, where Google Drive, Files or email can save it.</summary>
+	async Task BackUpAsync()
+	{
+		try
+		{
+			string path = Path.Combine(FileSystem.CacheDirectory, Backup.FileName);
+			File.WriteAllText(path, Backup.Create(AppState.Data));
+			await Share.Default.RequestAsync(new ShareFileRequest { Title = "Save your Decklore backup", File = new ShareFile(path, "application/json") });
+			_backupResult.Text = "Choose Drive (or Files) in the share menu to keep the backup somewhere safe.";
+		}
+		catch (Exception ex) { _backupResult.Text = "Couldn't make the backup: " + ex.Message; }
+	}
+
+	async Task RestoreAsync()
+	{
+		FileResult picked;
+		try
+		{
+			// Drive and other apps don't always label .json files the same way, so accept the common types.
+			var types = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+			{
+				[DevicePlatform.Android] = new[] { "application/json", "application/octet-stream", "text/plain", "text/json" },
+			});
+			picked = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Pick your Decklore backup", FileTypes = types });
+		}
+		catch (Exception ex) { _backupResult.Text = "Couldn't open the file picker: " + ex.Message; return; }
+		if (picked == null) return;
+
+		AppData restored; DateTime? created;
+		try
+		{
+			using var stream = await picked.OpenReadAsync();
+			using var reader = new StreamReader(stream);
+			(restored, created) = Backup.Read(await reader.ReadToEndAsync());
+		}
+		catch (Exception ex) { _backupResult.Text = ex is InvalidDataException ? ex.Message : "Couldn't read that file: " + ex.Message; return; }
+
+		string when = created is { } c ? $" from {c:MMMM d, yyyy h:mm tt}" : "";
+		if (!await DisplayAlertAsync("Restore backup", $"Restore this backup{when}?\n\n{Backup.Summary(restored)}\n\n" +
+		                                               "It replaces all the collections and decks on this phone. Your current data is saved first, so you can go back.",
+		                             "Restore", "Cancel")) return;
+		Backup.Restore(AppState.Data, restored);
+		AppState.Undo = null;
+		AppState.NotifyChanged();
+		_backupResult.Text = "Backup restored. Your previous data was saved as \"Before restore.json\" in the app's storage.";
 	}
 
 	Task RemoveKey()

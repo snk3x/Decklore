@@ -99,6 +99,12 @@ The key is stored encrypted for your Windows account in `%APPDATA%\Decklore\Just
 
 Your collection is saved to `%APPDATA%\Decklore\Card library.json`. If you used the app when it was called TCG deck scanner, Decklore copies your collection, settings and JustTCG key from the old `%APPDATA%\TCG deck scanner` folder the first time it opens, and leaves the old folder as a backup. The Android app does the same, and updates over the old app in place.
 
+## Backup and restore
+
+In **Settings**, **Back up** saves all your collections, loaners, saved decks and formats to one file, `Decklore backup.json`. On Windows the save window opens in your Google Drive or OneDrive folder if you have one. On Android the share menu opens, where you pick **Drive** (or Files, or email).
+
+**Restore** opens a backup file, shows what's in it, and asks before replacing everything in the app. Your current data is saved first as `Before restore.json` in the app's folder, so a mistaken restore can be undone by restoring that file. A backup made on Windows restores on Android and the other way round, which is also how to move your collection between devices. The JustTCG key isn't included; enter it again in Settings on a new device.
+
 ## What the optimizer checks
 
 | Game | Rules enforced | How cards are ranked |

@@ -892,14 +892,23 @@ public class MainForm : Form
         finally { SetBusy(false); }
     }
 
+    /// <summary>Where backup dialogs start: the Google Drive or OneDrive folder if there is one, so backups land in the cloud.</summary>
+    static string BackupFolder()
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var dir in new[] { Path.Combine(home, "My Drive"), "G:\\My Drive", Environment.GetEnvironmentVariable("OneDrive") })
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) return dir;
+        return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+    }
+
     async Task ShowSettings()
     {
         using var f = new Form
         {
-            Text = "Settings", Width = 620, Height = 560, StartPosition = FormStartPosition.CenterParent,
+            Text = "Settings", Width = 620, Height = 720, StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, Font = Font
         };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 1, AutoScroll = true };
         var title = new Label { Text = "Cyberpunk and Gundam prices (JustTCG)", AutoSize = true, Font = new Font(Font, FontStyle.Bold) };
         var info = new Label
         {
@@ -966,7 +975,53 @@ public class MainForm : Form
                    "Card data: Scryfall, TCGdex, YGOPRODeck, CyberpunkDB, and gcg-api (https://gcgapi.com, Open Database License). " +
                    "Prices: TCGplayer via those services and JustTCG."
         };
-        layout.Controls.AddRange(new Control[] { title, info, link, keyBox, buttons, result, aboutTitle, about });
+        var backupTitle = new Label { Text = "Backup", AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(3, 18, 3, 3) };
+        var backupInfo = new Label
+        {
+            AutoSize = true, MaximumSize = new Size(570, 0),
+            Text = "Save all your collections, loaners and saved decks to one file. Keep it in Google Drive, OneDrive or anywhere safe, " +
+                   "and restore it here or in the Android app. Your JustTCG key isn't included."
+        };
+        var backupButtons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        var backUp = new Button { Text = "Back up...", AutoSize = true };
+        var restore = new Button { Text = "Restore...", AutoSize = true };
+        backupButtons.Controls.AddRange(new Control[] { backUp, restore });
+        var backupResult = new Label { AutoSize = true, MaximumSize = new Size(570, 0), ForeColor = Color.DimGray };
+        backUp.Click += (s, e) =>
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Save backup", FileName = Backup.FileName, Filter = "Decklore backup (*.json)|*.json", DefaultExt = "json",
+                InitialDirectory = BackupFolder(),
+            };
+            if (dlg.ShowDialog(f) != DialogResult.OK) return;
+            try
+            {
+                File.WriteAllText(dlg.FileName, Backup.Create(_data));
+                backupResult.Text = $"Saved {Path.GetFileName(dlg.FileName)} in {Path.GetDirectoryName(dlg.FileName)}.";
+            }
+            catch (Exception ex) { backupResult.Text = "Couldn't save the backup: " + ex.Message; }
+        };
+        restore.Click += (s, e) =>
+        {
+            using var dlg = new OpenFileDialog { Title = "Restore a backup", Filter = "Decklore backup (*.json)|*.json|All files (*.*)|*.*", InitialDirectory = BackupFolder() };
+            if (dlg.ShowDialog(f) != DialogResult.OK) return;
+            AppData restored; DateTime? created;
+            try { (restored, created) = Backup.Read(File.ReadAllText(dlg.FileName)); }
+            catch (Exception ex) { backupResult.Text = ex is InvalidDataException ? ex.Message : "Couldn't open that file: " + ex.Message; return; }
+            if (MessageBox.Show(f, $"Restore this backup{(created is { } c ? $" from {c:MMMM d, yyyy h:mm tt}" : "")}?\n\n{Backup.Summary(restored)}\n\n" +
+                                   "It replaces all the collections and decks in Decklore on this PC. Your current data is saved first " +
+                                   "as \"Before restore.json\" in the app's folder, so you can go back.",
+                                "Restore backup", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            string safety = Backup.Restore(_data, restored);
+            _undo = null;
+            if (_gameBox.SelectedIndex != (int)_data.LastGame) _gameBox.SelectedIndex = (int)_data.LastGame; // refreshes everything
+            else OnGameChanged();
+            backupResult.Text = "Backup restored." + (safety != null ? $" Your previous data is in {safety}." : "");
+            SetStatus("Backup restored.");
+        };
+
+        layout.Controls.AddRange(new Control[] { title, info, link, keyBox, buttons, result, backupTitle, backupInfo, backupButtons, backupResult, aboutTitle, about });
         f.Controls.Add(layout);
         f.CancelButton = close;
         f.ShowDialog(this);
