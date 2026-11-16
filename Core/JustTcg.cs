@@ -13,9 +13,10 @@ namespace TcgScanner;
 public static class JustTcg
 {
     const string Base = "https://api.justtcg.com/v1/";
-    static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TCG deck scanner");
+    static string Dir => AppFolder.Dir;
     static string KeyFile => Path.Combine(Dir, "JustTCG key.dat");
     static string CacheFile(Game g) => Path.Combine(Dir, $"{GameInfo.Short(g)} prices.json");
+    // Keeps the app's old name on purpose: keys saved before the rename to Decklore were encrypted with it.
     static readonly byte[] Entropy = Encoding.UTF8.GetBytes("TCG deck scanner JustTCG");
 
     /// <summary>Games priced through JustTCG, with the word used to find each one in JustTCG's game list.</summary>

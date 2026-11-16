@@ -143,9 +143,52 @@ public class AppData
     }
 }
 
+/// <summary>
+/// Where the app keeps its data (collection, settings, price and card caches). The app was called "TCG deck scanner"
+/// before version 1.3; the first time Decklore runs, everything in the old folder is copied over. The old folder is
+/// left in place as a backup.
+/// </summary>
+public static class AppFolder
+{
+    public const string Name = "Decklore";
+    const string OldName = "TCG deck scanner";
+    static readonly object Gate = new();
+    static bool _checked;
+
+    public static string Dir
+    {
+        get
+        {
+            string root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string dir = Path.Combine(root, Name);
+            lock (Gate)
+            {
+                if (_checked) return dir;
+                _checked = true;
+                try
+                {
+                    string old = Path.Combine(root, OldName);
+                    if (!Directory.Exists(dir) && Directory.Exists(old))
+                    {
+                        // Copy into a temporary folder first, so a half-finished copy is never mistaken for the real thing.
+                        string tmp = dir + " moving";
+                        if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+                        Directory.CreateDirectory(tmp);
+                        foreach (var file in Directory.GetFiles(old))
+                            File.Copy(file, Path.Combine(tmp, Path.GetFileName(file)), true);
+                        Directory.Move(tmp, dir);
+                    }
+                }
+                catch { /* if the copy fails the app starts fresh in the new folder, and the old folder is untouched */ }
+            }
+            return dir;
+        }
+    }
+}
+
 public static class Storage
 {
-    static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TCG deck scanner");
+    static string Dir => AppFolder.Dir;
     static string FilePath => Path.Combine(Dir, "Card library.json");
 
     public static AppData Load()

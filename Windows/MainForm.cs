@@ -63,7 +63,7 @@ public class MainForm : Form
             [Game.Cyberpunk] = new CyberpunkRules(),
             [Game.Gundam] = new GundamRules(),
         };
-        Text = "TCG deck scanner";
+        Text = "Decklore";
         Width = 1300;
         Height = 840;
         MinimumSize = new Size(1000, 640);
@@ -959,7 +959,7 @@ public class MainForm : Form
         var about = new Label
         {
             AutoSize = true, MaximumSize = new Size(570, 0),
-            Text = $"TCG deck scanner {version}. An unofficial fan project, not affiliated with the companies behind these games.\n\n" +
+            Text = $"Decklore {version}. An unofficial fan project, not affiliated with the companies behind these games.\n\n" +
                    "Thanks to Levi for field testing the app and suggesting improvements.\n\n" +
                    "Card data: Scryfall, TCGdex, YGOPRODeck, CyberpunkDB, and gcg-api (https://gcgapi.com, Open Database License). " +
                    "Prices: TCGplayer via those services and JustTCG."

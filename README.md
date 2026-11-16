@@ -1,12 +1,12 @@
-# TCG deck scanner
+# Decklore
 
-A Windows and Android app that scans trading cards hands-free with a camera, keeps track of your collection and its value, and builds or fixes a deck for Magic: The Gathering, Pokémon TCG, Yu-Gi-Oh!, the Cyberpunk TCG, or the Gundam Card Game.
+Decklore (formerly TCG deck scanner) is a Windows and Android app that scans trading cards hands-free with a camera, keeps track of your collection and its value, and builds or fixes a deck for Magic: The Gathering, Pokémon TCG, Yu-Gi-Oh!, the Cyberpunk TCG, or the Gundam Card Game.
 
 ## Download (easiest)
 
-Go to the [latest release](https://github.com/snk3x/TCGDeckScanner/releases/latest):
+Go to the [latest release](https://github.com/snk3x/Decklore/releases/latest):
 
-- **Windows:** download the zip, unzip it, and double-click **TCG deck scanner.exe**. Nothing else to install. Windows may show "Windows protected your PC" because the app isn't signed with a paid certificate; click **More info**, then **Run anyway**.
+- **Windows:** download the zip, unzip it, and double-click **Decklore.exe**. Nothing else to install. Windows may show "Windows protected your PC" because the app isn't signed with a paid certificate; click **More info**, then **Run anyway**.
 - **Android (6.0 or newer):** download the `.apk` on your phone and open it. Android asks to allow installing apps from your browser or Files app the first time; allow it, then tap **Install**.
 
 ## Install from source
@@ -17,9 +17,9 @@ Go to the [latest release](https://github.com/snk3x/TCGDeckScanner/releases/late
 
 ## Run it
 
-Open **TCG deck scanner** from the shortcut on your Desktop or from the Start menu.
+Open **Decklore** from the shortcut on your Desktop or from the Start menu.
 
-To update it after the code changes, double-click **Install or update.cmd** in this folder again. It builds the app, installs it to `%LOCALAPPDATA%\Programs\TCG deck scanner`, refreshes the shortcuts, and opens the app. Your collection and settings are kept.
+To update it after the code changes, double-click **Install or update.cmd** in this folder again. It builds the app, installs it to `%LOCALAPPDATA%\Programs\Decklore`, refreshes the shortcuts, and opens the app. Your collection and settings are kept. If you had the app installed under its old name, TCG deck scanner, the old program and shortcuts are removed.
 
 Needs Windows 10 or 11, the .NET 10 runtime, an internet connection, and English in Windows language settings (for text recognition).
 
@@ -94,9 +94,9 @@ Every card shows its market price in US dollars:
 2. In the app, click **Settings...**, paste the key, and press **Test and save**.
 3. On the Collection tab, press **Refresh prices**.
 
-The key is stored encrypted for your Windows account in `%APPDATA%\TCG deck scanner\JustTCG key.dat`. The free plan is for personal use and allows 100 requests a day. The app downloads all Cyberpunk prices in about 8 requests and reuses them for a day. Gundam has over 2,000 printings, so instead the app looks up each new card number once (1 request) and remembers it for a day.
+The key is stored encrypted for your Windows account in `%APPDATA%\Decklore\JustTCG key.dat`. The free plan is for personal use and allows 100 requests a day. The app downloads all Cyberpunk prices in about 8 requests and reuses them for a day. Gundam has over 2,000 printings, so instead the app looks up each new card number once (1 request) and remembers it for a day.
 
-Your collection is saved to `%APPDATA%\TCG deck scanner\Card library.json`.
+Your collection is saved to `%APPDATA%\Decklore\Card library.json`. If you used the app when it was called TCG deck scanner, Decklore copies your collection, settings and JustTCG key from the old `%APPDATA%\TCG deck scanner` folder the first time it opens, and leaves the old folder as a backup. The Android app does the same, and updates over the old app in place.
 
 ## What the optimizer checks
 

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<!-- TCG deck scanner for Android phones. Shares card lookups, prices, deck rules and guides with the Windows app (Core). -->
+	<!-- Decklore for Android phones. Shares card lookups, prices, deck rules and guides with the Windows app (Core). -->
 	<PropertyGroup>
 		<TargetFramework>net10.0-android</TargetFramework>
 		<OutputType>Exe</OutputType>
@@ -11,10 +11,10 @@
 		<Nullable>disable</Nullable>
 		<MauiXamlInflator>SourceGen</MauiXamlInflator>
 
-		<ApplicationTitle>TCG deck scanner</ApplicationTitle>
+		<ApplicationTitle>Decklore</ApplicationTitle>
 		<ApplicationId>com.snk3x.tcgdeckscanner</ApplicationId>
-		<ApplicationDisplayVersion>1.2.1</ApplicationDisplayVersion>
-		<ApplicationVersion>4</ApplicationVersion>
+		<ApplicationDisplayVersion>1.3</ApplicationDisplayVersion>
+		<ApplicationVersion>5</ApplicationVersion>
 
 		<SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
 		<AndroidPackageFormat>apk</AndroidPackageFormat>

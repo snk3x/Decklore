@@ -127,7 +127,7 @@ public class ScanPage : ContentPage
 		}
 		if (status != PermissionStatus.Granted)
 		{
-			_liveStatus.Text = "Camera permission is off. Allow it in Android Settings > Apps > TCG deck scanner.";
+			_liveStatus.Text = "Camera permission is off. Allow it in Android Settings > Apps > Decklore.";
 			return;
 		}
 		_camera.IsActive = true;
@@ -245,7 +245,7 @@ public class ScanPage : ContentPage
 		}
 		catch (PermissionException)
 		{
-			SetBusy(false, "Camera permission is needed to scan. Allow it in Android Settings > Apps > TCG deck scanner.");
+			SetBusy(false, "Camera permission is needed to scan. Allow it in Android Settings > Apps > Decklore.");
 		}
 		catch (Exception ex)
 		{

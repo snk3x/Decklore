@@ -12,5 +12,5 @@ public partial class App : Application
 		JustTcg.Secrets = SecureSecretStore.Create();
 	}
 
-	protected override Window CreateWindow(IActivationState activationState) => new(new AppShell()) { Title = "TCG deck scanner" };
+	protected override Window CreateWindow(IActivationState activationState) => new(new AppShell()) { Title = "Decklore" };
 }

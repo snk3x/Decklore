@@ -6,11 +6,11 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>TCG deck scanner</AssemblyName>
+    <AssemblyName>Decklore</AssemblyName>
     <RootNamespace>TcgScanner</RootNamespace>
-    <Product>TCG deck scanner</Product>
-    <AssemblyTitle>TCG deck scanner</AssemblyTitle>
-    <Version>1.2.1</Version>
+    <Product>Decklore</Product>
+    <AssemblyTitle>Decklore</AssemblyTitle>
+    <Version>1.3.0</Version>
     <ApplicationIcon>Card icon.ico</ApplicationIcon>
   </PropertyGroup>
 

@@ -13,7 +13,7 @@ public static class Http
     static HttpClient Create()
     {
         var c = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        c.DefaultRequestHeaders.UserAgent.ParseAdd("TCGDeckScanner/1.0");
+        c.DefaultRequestHeaders.UserAgent.ParseAdd("Decklore/1.3");
         c.DefaultRequestHeaders.Accept.ParseAdd("application/json");
         return c;
     }
@@ -821,7 +821,7 @@ public class GundamSource : ICardSource
     public Game Game => Game.Gundam;
 
     static List<Card> _catalogue;
-    static string CacheFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TCG deck scanner", "Gundam cards.json");
+    static string CacheFile => Path.Combine(AppFolder.Dir, "Gundam cards.json");
 
     /// <summary>All ~2,200 printings. The source refreshes weekly, so a local copy is kept for 3 days.</summary>
     public static async Task<List<Card>> CatalogueAsync(bool force = false, CancellationToken ct = default)
