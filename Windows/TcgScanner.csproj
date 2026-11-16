@@ -10,7 +10,7 @@
     <RootNamespace>TcgScanner</RootNamespace>
     <Product>Decklore</Product>
     <AssemblyTitle>Decklore</AssemblyTitle>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <ApplicationIcon>Card icon.ico</ApplicationIcon>
   </PropertyGroup>
 

@@ -13,8 +13,8 @@
 
 		<ApplicationTitle>Decklore</ApplicationTitle>
 		<ApplicationId>com.snk3x.tcgdeckscanner</ApplicationId>
-		<ApplicationDisplayVersion>1.3</ApplicationDisplayVersion>
-		<ApplicationVersion>5</ApplicationVersion>
+		<ApplicationDisplayVersion>1.4</ApplicationDisplayVersion>
+		<ApplicationVersion>6</ApplicationVersion>
 
 		<SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
 		<AndroidPackageFormat>apk</AndroidPackageFormat>
