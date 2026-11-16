@@ -7,6 +7,7 @@ public class DeckPage : ContentPage
 {
 	readonly Picker _format = new() { Title = "Format" };
 	readonly Label _summary = new() { FontAttributes = FontAttributes.Bold };
+	readonly Label _deckTitle = new Label { FontSize = 18, FontAttributes = FontAttributes.Bold }.AccentText();
 	readonly Label _report = new() { FontSize = 13 };
 	readonly VerticalStackLayout _deckList = new() { Spacing = 2 };
 	readonly Button _starter;
@@ -35,7 +36,9 @@ public class DeckPage : ContentPage
 					Ui.Title("Deck"),
 					Ui.GamePicker(),
 					_format,
+					_deckTitle,
 					_summary,
+					Ui.Row(Ui.Secondary("Save deck", SaveDeckAsync), Ui.Secondary("My decks", MyDecksAsync)),
 					Ui.Row(Ui.Primary("Optimize", Optimize), Ui.Secondary("Analyze", () => { Analyze(); return Task.CompletedTask; })),
 					Ui.Row(Ui.Secondary("Upgrades", UpgradesAsync), Ui.Secondary("Loaner picks", LoanerPicksAsync)),
 					Ui.Row(Ui.Secondary("Undo", UndoAsync), _starter),
@@ -68,6 +71,7 @@ public class DeckPage : ContentPage
 
 		var report = rules.Analyze(AppState.Lib, AppState.Format);
 		double value = AppState.Lib.Deck.Sum(e => e.InDeck * e.Card.PriceUsd);
+		_deckTitle.Text = DeckStore.Title(AppState.Lib);
 		_summary.Text = $"{AppState.Lib.DeckCount} cards   ·   Value {(value > 0 ? Money.Format(value) : "$0.00")}   ·   Health {report.Health}/100";
 		_summary.TextColor = report.Health >= 80 ? Ui.Good : report.Health >= 50 ? Ui.Warn : Ui.Bad;
 		if (string.IsNullOrEmpty(_report.Text)) _report.Text = "Tap Analyze to check the deck, or Optimize to build the best deck from your scanned cards.";
@@ -111,6 +115,91 @@ public class DeckPage : ContentPage
 		}
 		catch (Exception ex) { _report.Text = AppState.FriendlyError(ex); }
 		finally { SetBusy(false); }
+	}
+
+	// ------------------------------------------------------------------ saved decks
+
+	async Task<bool> SaveDeckCoreAsync()
+	{
+		var lib = AppState.Lib;
+		if (lib.DeckCount == 0) { _report.Text = "The deck is empty. Add cards or tap Optimize first."; return false; }
+		string suggestion = DeckStore.Find(lib, lib.OpenDeck) != null ? lib.OpenDeck : DeckStore.SuggestName(lib, AppState.Format);
+		string name = await DisplayPromptAsync("Save deck", "Name for this deck:", "Save", "Cancel", initialValue: suggestion, maxLength: 60);
+		if (string.IsNullOrWhiteSpace(name)) return false;
+		var existing = DeckStore.Find(lib, name);
+		if (existing != null && !string.Equals(existing.Name, lib.OpenDeck, StringComparison.OrdinalIgnoreCase) &&
+		    !await DisplayAlertAsync("Save deck", $"You already have a deck called {existing.Name}. Replace it with this deck?", "Replace", "Cancel"))
+			return false;
+		var deck = DeckStore.Save(lib, name, AppState.Format);
+		AppState.NotifyChanged();
+		_report.Text = $"Saved {deck.Name} ({deck.Count} cards). Open it any time from My decks.";
+		return true;
+	}
+
+	Task SaveDeckAsync() => SaveDeckCoreAsync();
+
+	/// <summary>Before the deck on screen is replaced: offers to save unsaved changes. False means cancel.</summary>
+	async Task<bool> OfferToSaveChangesAsync()
+	{
+		var lib = AppState.Lib;
+		if (!DeckStore.HasUnsavedChanges(lib)) return true;
+		string what = DeckStore.Find(lib, lib.OpenDeck) != null ? $"the changes to {lib.OpenDeck}" : "the deck on screen";
+		string choice = await DisplayActionSheetAsync($"Save {what} first?", "Cancel", null, "Save", "Don't save");
+		if (choice == "Don't save") return true;
+		if (choice == "Save") return await SaveDeckCoreAsync();
+		return false;
+	}
+
+	async Task MyDecksAsync()
+	{
+		if (_working) return;
+		var lib = AppState.Lib;
+		const string NewDeck = "+ Start a new deck";
+		var decks = lib.SavedDecks.OrderByDescending(d => d.Saved).ToList();
+		var labels = decks.Select(d => $"{d.Name}{(string.Equals(d.Name, lib.OpenDeck, StringComparison.OrdinalIgnoreCase) ? " (open)" : "")}  ·  " +
+		                               $"{d.Format}, {d.Count} cards").ToList();
+		labels.Add(NewDeck);
+		string title = decks.Count == 0 ? "No saved decks yet. Build a deck, then tap Save deck." : $"My {GameInfo.Short(AppState.Game)} decks";
+		string choice = await DisplayActionSheetAsync(title, "Cancel", null, labels.ToArray());
+		if (choice == null || choice == "Cancel") return;
+
+		if (choice == NewDeck)
+		{
+			if (!await OfferToSaveChangesAsync()) return;
+			AppState.SnapshotDeck();
+			foreach (var e in lib.Entries.Values) e.InDeck = 0;
+			lib.OpenDeck = "";
+			AppState.NotifyChanged();
+			_report.Text = "New deck. Add cards from the Collection tab, or tap Optimize to build one from your cards. Undo brings the previous deck back.";
+			return;
+		}
+
+		var deck = decks[labels.IndexOf(choice)];
+		string action = await DisplayActionSheetAsync(deck.Name, "Cancel", "Delete", "Open", "Rename");
+		switch (action)
+		{
+			case "Open":
+				if (!await OfferToSaveChangesAsync()) return;
+				AppState.SnapshotDeck();
+				DeckStore.Open(lib, deck);
+				if (AppState.CurrentRules.Formats.Contains(deck.Format)) AppState.Format = deck.Format;
+				AppState.NotifyChanged();
+				_report.Text = $"Opened {deck.Name}. Edit it, then tap Save deck to keep your changes. Undo goes back to the previous deck.\n\n" +
+				               AppState.CurrentRules.Analyze(lib, AppState.Format).ToString().Trim();
+				break;
+			case "Rename":
+				string name = await DisplayPromptAsync("Rename deck", "New name:", "Save", "Cancel", initialValue: deck.Name, maxLength: 60);
+				if (name == null) return;
+				string error = DeckStore.Rename(lib, deck, name);
+				if (error != null) { await DisplayAlertAsync("Rename deck", error, "OK"); return; }
+				AppState.NotifyChanged();
+				break;
+			case "Delete":
+				if (!await DisplayAlertAsync("Delete deck", $"Delete the saved deck {deck.Name}? This can't be undone. Your cards stay in your collection.", "Delete", "Cancel")) return;
+				DeckStore.Delete(lib, deck);
+				AppState.NotifyChanged();
+				break;
+		}
 	}
 
 	async Task UpgradesAsync()

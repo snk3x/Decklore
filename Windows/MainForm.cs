@@ -254,6 +254,8 @@ public class MainForm : Form
         bar.AutoSize = true;
         bar.Controls.AddRange(new Control[]
         {
+            Btn("Save deck...", (s, e) => SaveDeck()),
+            Btn("My decks...", (s, e) => ShowMyDecks()),
             Btn("Analyze", (s, e) => Analyze()),
             _optimizeBtn,
             Btn("Upgrades...", async (s, e) => await ShowUpgrades()),
@@ -482,7 +484,7 @@ public class MainForm : Form
             });
             var report = Rules.Analyze(Lib, Format);
             double deckValue = Lib.Deck.Sum(e => e.InDeck * e.Card.PriceUsd);
-            _deckSummary.Text = $"{Lib.DeckCount} cards   ·   Deck value {(deckValue > 0 ? Money.Format(deckValue) : "$0.00")}   ·   Deck health {report.Health}/100";
+            _deckSummary.Text = $"{DeckStore.Title(Lib)}   ·   {Lib.DeckCount} cards   ·   Deck value {(deckValue > 0 ? Money.Format(deckValue) : "$0.00")}   ·   Deck health {report.Health}/100";
             _deckSummary.ForeColor = report.Health >= 80 ? Color.DarkGreen : report.Health >= 50 ? Color.DarkGoldenrod : Color.Firebrick;
         }
         finally { _refreshing = false; }
@@ -1306,6 +1308,159 @@ public class MainForm : Form
         RefreshAll();
         Analyze();
         SetStatus(removed > 0 ? $"Restored the previous deck and removed {removed} card(s) the last action had added to your collection." : "Restored the previous deck.");
+    }
+
+    // ------------------------------------------------------------------ saved decks
+
+    /// <summary>Saves the deck on the Deck tab. Asks for a name; the open deck's name is suggested, so saving again updates it.</summary>
+    bool SaveDeck()
+    {
+        if (Lib.DeckCount == 0) { SetStatus("The deck is empty. Add cards or press Optimize first."); return false; }
+        string suggestion = DeckStore.Find(Lib, Lib.OpenDeck) != null ? Lib.OpenDeck : DeckStore.SuggestName(Lib, Format);
+        string name = Prompt("Save deck", "Name for this deck:", suggestion);
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var existing = DeckStore.Find(Lib, name);
+        if (existing != null && !string.Equals(existing.Name, Lib.OpenDeck, StringComparison.OrdinalIgnoreCase) &&
+            MessageBox.Show(this, $"You already have a deck called {existing.Name}. Replace it with this deck?", "Save deck",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+        var deck = DeckStore.Save(Lib, name, Format);
+        Save();
+        RefreshDeck();
+        SetStatus($"Saved {deck.Name} ({deck.Count} cards). Open it any time from My decks.");
+        return true;
+    }
+
+    /// <summary>Before the deck on the Deck tab is replaced: offers to save unsaved changes. False means cancel.</summary>
+    bool OfferToSaveChanges()
+    {
+        if (!DeckStore.HasUnsavedChanges(Lib)) return true;
+        string what = DeckStore.Find(Lib, Lib.OpenDeck) != null ? $"the changes to {Lib.OpenDeck}" : "the deck on the Deck tab";
+        var answer = MessageBox.Show(this, $"Save {what} first?", "My decks", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (answer == DialogResult.Cancel) return false;
+        return answer == DialogResult.No || SaveDeck();
+    }
+
+    void ShowMyDecks()
+    {
+        if (_busy) return;
+        using var dlg = new Form
+        {
+            Text = $"My decks ({GameInfo.Short(CurrentGame)})", Width = 760, Height = 440, StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false, ShowIcon = false, Font = Font,
+        };
+        var list = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, MultiSelect = false, HideSelection = false };
+        list.Columns.Add("Deck", 230);
+        list.Columns.Add("Format", 110);
+        list.Columns.Add("Cards", 60, HorizontalAlignment.Right);
+        list.Columns.Add("Value", 85, HorizontalAlignment.Right);
+        list.Columns.Add("Saved", 150);
+        var info = new Label { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 8, 8, 0), ForeColor = Color.DimGray };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(4), FlowDirection = FlowDirection.LeftToRight };
+        var open = new Button { Text = "Open", AutoSize = true, Height = 30, Font = new Font(Font, FontStyle.Bold) };
+        var rename = new Button { Text = "Rename...", AutoSize = true, Height = 30 };
+        var delete = new Button { Text = "Delete", AutoSize = true, Height = 30 };
+        var newDeck = new Button { Text = "Start a new deck", AutoSize = true, Height = 30 };
+        var close = new Button { Text = "Close", AutoSize = true, Height = 30, DialogResult = DialogResult.Cancel };
+        buttons.Controls.AddRange(new Control[] { open, rename, delete, newDeck, close });
+        dlg.Controls.Add(list);
+        dlg.Controls.Add(buttons);
+        dlg.Controls.Add(info);
+        dlg.CancelButton = close;
+
+        void Fill()
+        {
+            list.Items.Clear();
+            foreach (var d in Lib.SavedDecks.OrderByDescending(d => d.Saved))
+            {
+                bool isOpen = string.Equals(d.Name, Lib.OpenDeck, StringComparison.OrdinalIgnoreCase);
+                var item = new ListViewItem(d.Name + (isOpen ? "  (open)" : ""));
+                item.SubItems.Add(d.Format);
+                item.SubItems.Add(d.Count.ToString());
+                item.SubItems.Add(d.Value > 0 ? Money.Format(d.Value) : "");
+                item.SubItems.Add(d.Saved.ToString("MMM d, yyyy h:mm tt"));
+                item.Tag = d;
+                if (isOpen) item.Font = new Font(list.Font, FontStyle.Bold);
+                list.Items.Add(item);
+            }
+            info.Text = Lib.SavedDecks.Count == 0
+                ? "No saved decks yet. Build a deck, then press Save deck on the Deck tab."
+                : "Open a deck to edit it on the Deck tab, then press Save deck to keep your changes.";
+            open.Enabled = rename.Enabled = delete.Enabled = list.Items.Count > 0;
+            if (list.Items.Count > 0) list.Items[0].Selected = true;
+        }
+        SavedDeck Selected() => list.SelectedItems.Count == 0 ? null : (SavedDeck)list.SelectedItems[0].Tag;
+
+        open.Click += (s, e) =>
+        {
+            var d = Selected();
+            if (d == null || !OfferToSaveChanges()) return;
+            _undo = new LibrarySnapshot(Lib);
+            DeckStore.Open(Lib, d);
+            if (Rules.Formats.Contains(d.Format) && Format != d.Format) _formatBox.SelectedItem = d.Format; // saves and refreshes
+            Save();
+            RefreshAll();
+            Analyze();
+            SetStatus($"Opened {d.Name}. Undo optimize goes back to the previous deck.");
+            dlg.Close();
+        };
+        list.DoubleClick += (s, e) => open.PerformClick();
+        rename.Click += (s, e) =>
+        {
+            var d = Selected();
+            if (d == null) return;
+            string name = Prompt("Rename deck", "New name:", d.Name);
+            if (name == null) return;
+            string error = DeckStore.Rename(Lib, d, name);
+            if (error != null) { info.Text = error; return; }
+            Save();
+            Fill();
+            RefreshDeck();
+        };
+        delete.Click += (s, e) =>
+        {
+            var d = Selected();
+            if (d == null) return;
+            if (MessageBox.Show(dlg, $"Delete the saved deck {d.Name}? This can't be undone. Your cards stay in your collection.", "Delete deck",
+                                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            DeckStore.Delete(Lib, d);
+            Save();
+            Fill();
+            RefreshDeck();
+        };
+        newDeck.Click += (s, e) =>
+        {
+            if (!OfferToSaveChanges()) return;
+            _undo = new LibrarySnapshot(Lib);
+            foreach (var x in Lib.Entries.Values) x.InDeck = 0;
+            Lib.OpenDeck = "";
+            Save();
+            RefreshAll();
+            _reportBox.Text = "New deck. Add cards from the Collection tab, or press Optimize to build one from your cards.";
+            SetStatus("Started a new deck. Your saved decks are unchanged.");
+            dlg.Close();
+        };
+
+        Fill();
+        dlg.ShowDialog(this);
+    }
+
+    /// <summary>A small text prompt. Returns null when cancelled.</summary>
+    string Prompt(string title, string text, string value)
+    {
+        using var f = new Form
+        {
+            Text = title, Width = 420, Height = 170, StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, ShowIcon = false, Font = Font,
+        };
+        var label = new Label { Text = text, AutoSize = true, Location = new Point(12, 14) };
+        var box = new TextBox { Text = value, Location = new Point(12, 38), Width = 380, MaxLength = 60 };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(236, 76), AutoSize = true };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(318, 76), AutoSize = true };
+        f.Controls.AddRange(new Control[] { label, box, ok, cancel });
+        f.AcceptButton = ok;
+        f.CancelButton = cancel;
+        f.Shown += (s, e) => box.SelectAll();
+        return f.ShowDialog(this) == DialogResult.OK ? box.Text.Trim() : null;
     }
 
     void ClearDeck()

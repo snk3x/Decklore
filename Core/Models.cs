@@ -102,6 +102,10 @@ public class LibraryEntry
 public class Library
 {
     public Dictionary<string, LibraryEntry> Entries { get; set; } = new();
+    /// <summary>Decks saved by name for this game. The deck on the Deck tab is a working copy of one of them, or a new deck.</summary>
+    public List<SavedDeck> SavedDecks { get; set; } = new();
+    /// <summary>Name of the saved deck now on the Deck tab, or "" when it hasn't been saved yet.</summary>
+    public string OpenDeck { get; set; } = "";
 
     [JsonIgnore] public IEnumerable<LibraryEntry> Deck => Entries.Values.Where(e => e.InDeck > 0);
     [JsonIgnore] public int DeckCount => Entries.Values.Sum(e => e.InDeck);

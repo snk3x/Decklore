@@ -48,6 +48,7 @@ dotnet build Android\TcgMobile.csproj -c Release
 2. **Collection.** Every scanned card lands here. Edit Owned or In deck directly in the yellow columns.
    - **Loaner cards** are cards you could borrow or want to buy. Tick **Scan as loaner** on the Scan tab (or type a count in the Loaner column) and add a note like "from Alex". Loaners never count as owned. Use **Show: Loaners only** to see them with the cost to buy, and **Mark loaner as bought** when you get one.
 3. **Deck.** Pick the format at the top, then:
+   - **Save deck** keeps the deck under a name, and **My decks** lists your saved decks for that game. Open one to keep editing it on the Deck tab, then press Save deck again to update it. The deck name at the top shows "(unsaved changes)" when you've changed it since saving. You can also rename or delete decks there, or start a new one. Saving or opening decks never changes which cards you own.
    - **Analyze** checks the deck against the format's rules and gives a health score.
    - **Optimize from my collection** rebuilds the deck using only cards you own, plus free basic lands or basic Energy.
    - **Upgrades** (Magic, Gundam, Cyberpunk) finds the weakest cards in your deck and lists up to three stronger cards for each that do a similar job, strongest first, with prices. Your deck is not changed. Tick the ones you want and press **Add checked to wishlist** to save them as loaners, then press **Loaner picks** to see the deck with them.

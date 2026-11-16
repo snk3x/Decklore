@@ -84,11 +84,13 @@ public sealed class LibrarySnapshot
 {
     readonly Library _library;
     readonly Dictionary<LibraryEntry, (int owned, int inDeck, int loaned)> _counts;
+    readonly string _openDeck;
 
     public LibrarySnapshot(Library library)
     {
         _library = library;
         _counts = library.Entries.Values.ToDictionary(e => e, e => (e.Owned, e.InDeck, e.Loaned));
+        _openDeck = library.OpenDeck;
     }
 
     /// <summary>True when this snapshot belongs to that collection (each game has its own).</summary>
@@ -103,6 +105,7 @@ public sealed class LibrarySnapshot
             if (_counts.TryGetValue(e, out var c)) { e.Owned = c.owned; e.InDeck = c.inDeck; e.Loaned = c.loaned; }
             else { _library.Remove(e); removed++; }
         }
+        _library.OpenDeck = _openDeck;
         return removed;
     }
 }
