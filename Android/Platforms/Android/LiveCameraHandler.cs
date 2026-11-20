@@ -16,9 +16,11 @@ public class LiveCameraHandler : ViewHandler<LiveCameraView, PreviewView>
 		new PropertyMapper<LiveCameraView, LiveCameraHandler>(ViewMapper)
 		{
 			[nameof(LiveCameraView.IsActive)] = (h, v) => h.UpdateActive(),
+			[nameof(LiveCameraView.TorchOn)] = (h, v) => h.UpdateTorch(),
 		};
 
 	ProcessCameraProvider _provider;
+	ICamera _camera;
 	IExecutorService _executor;
 	bool _bound;
 
@@ -78,14 +80,26 @@ public class LiveCameraHandler : ViewHandler<LiveCameraView, PreviewView>
 		analysis.SetAnalyzer(_executor, new FrameAnalyzer(this));
 
 		var owner = (ILifecycleOwner)Platform.CurrentActivity;
-		_provider.BindToLifecycle(owner, CameraSelector.DefaultBackCamera, preview, analysis);
+		_camera = _provider.BindToLifecycle(owner, CameraSelector.DefaultBackCamera, preview, analysis);
 		_bound = true;
+		bool hasLight = _camera?.CameraInfo?.HasFlashUnit == true;
+		VirtualView?.TorchAvailable?.Invoke(hasLight);
+		UpdateTorch();
+	}
+
+	/// <summary>Turns the camera's light on or off. Unbinding the camera turns it off by itself.</summary>
+	void UpdateTorch()
+	{
+		if (!_bound || _camera?.CameraInfo?.HasFlashUnit != true) return;
+		try { _camera.CameraControl.EnableTorch(VirtualView?.TorchOn == true); }
+		catch { /* some cameras refuse while starting up; the next toggle tries again */ }
 	}
 
 	void Stop()
 	{
 		if (!_bound) return;
 		_provider?.UnbindAll();
+		_camera = null;
 		_bound = false;
 	}
 

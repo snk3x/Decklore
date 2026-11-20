@@ -18,6 +18,19 @@ public class LiveCameraView : View
 		set => SetValue(IsActiveProperty, value);
 	}
 
+	public static readonly BindableProperty TorchOnProperty =
+		BindableProperty.Create(nameof(TorchOn), typeof(bool), typeof(LiveCameraView), false);
+
+	/// <summary>The camera's light (flash LED) kept on while scanning, for dark rooms or glare-free lighting.</summary>
+	public bool TorchOn
+	{
+		get => (bool)GetValue(TorchOnProperty);
+		set => SetValue(TorchOnProperty, value);
+	}
+
+	/// <summary>Called on the main thread once the camera starts: true when it has a light that can be turned on.</summary>
+	public Action<bool> TorchAvailable { get; set; }
+
 	/// <summary>Called on the main thread for each frame that was read.</summary>
 	public Func<ScanResult, Task> FrameScanned { get; set; }
 

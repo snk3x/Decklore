@@ -19,6 +19,7 @@ public class ScanPage : ContentPage
 	readonly Border _frame = new() { StrokeThickness = 4, BackgroundColor = Colors.Transparent, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center, InputTransparent = true };
 	readonly Label _liveStatus = new() { TextColor = Colors.White, FontSize = 15, FontAttributes = FontAttributes.Bold, Padding = new Thickness(10, 6), HorizontalTextAlignment = TextAlignment.Center };
 	readonly Button _liveButton;
+	readonly Button _lightButton;
 	readonly AutoScanSession _auto = new();
 	bool _liveWanted = true, _permissionAsked;
 	bool _sound = Preferences.Default.Get("scan-sound", true);
@@ -59,6 +60,16 @@ public class ScanPage : ContentPage
 			VerticalOptions = LayoutOptions.End, Margin = new Thickness(0, 0, 0, 10), HorizontalOptions = LayoutOptions.Center,
 			StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 8 }, InputTransparent = true,
 		});
+		// Light toggle in the top corner of the camera view, shown once the camera reports that it has a light.
+		_lightButton = new Button
+		{
+			Text = "Light off", FontSize = 14, FontAttributes = FontAttributes.Bold, CornerRadius = 18, Padding = new Thickness(14, 6),
+			HorizontalOptions = LayoutOptions.End, VerticalOptions = LayoutOptions.Start, Margin = new Thickness(0, 10, 10, 0), IsVisible = false,
+		};
+		_lightButton.Clicked += (s, e) => SetLight(!_camera.TorchOn);
+		SetLight(false);
+		_camera.TorchAvailable = has => _lightButton.IsVisible = has;
+		liveArea.Add(_lightButton);
 		_liveButton = Ui.Secondary("Pause camera", ToggleLive);
 
 		Content = new ScrollView
@@ -115,6 +126,16 @@ public class ScanPage : ContentPage
 	{
 		base.OnDisappearing();
 		_camera.IsActive = false; // stop the camera when leaving the tab, to save battery
+		SetLight(false);           // the light goes out with the camera; show it as off when coming back
+	}
+
+	/// <summary>Turns the camera light on or off and shows the state on the button (bright yellow when on).</summary>
+	void SetLight(bool on)
+	{
+		_camera.TorchOn = on;
+		_lightButton.Text = on ? "Light on" : "Light off";
+		_lightButton.BackgroundColor = on ? Color.FromArgb("#FACC15") : Color.FromArgb("#99000000");
+		_lightButton.TextColor = on ? Colors.Black : Colors.White;
 	}
 
 	async Task StartLive()
@@ -141,6 +162,8 @@ public class ScanPage : ContentPage
 		else
 		{
 			_camera.IsActive = false;
+			SetLight(false);
+			_lightButton.IsVisible = false; // shown again when the camera restarts
 			_liveButton.Text = "Resume camera";
 			_liveStatus.Text = "Camera paused.";
 		}
